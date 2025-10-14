@@ -1,5 +1,5 @@
 # Zone News Bot - Telegram Bot Service
-FROM node:18-alpine
+FROM node:20-alpine
 
 # Set working directory
 WORKDIR /app
@@ -8,13 +8,13 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install production dependencies
-RUN npm ci --only=production && npm cache clean --force
+RUN npm install --omit=dev && npm cache clean --force
 
 # Copy application code
 COPY . .
 
-# Create logs directory
-RUN mkdir -p logs
+# Create logs directory and set permissions
+RUN mkdir -p logs && chown -R node:node logs
 
 # Set environment variables
 ENV NODE_ENV=production \
