@@ -1,5 +1,5 @@
 /**
- * Start Menu Handler - Handle /start command and main menu interactions
+ * Start Menu Handler - Simplified version without database queries
  */
 
 const HandlerImplementations = require('./handler-implementations');
@@ -12,56 +12,52 @@ class StartMenuHandler {
         this.implementations = new HandlerImplementations(bot, db, services);
     }
 
-    /**
-     * Setup start command and main menu
-     */
     setupStartCommand() {
         this.bot.command('start', async (ctx) => {
             try {
                 const userId = ctx.from.id;
                 const username = ctx.from.username || ctx.from.first_name || 'User';
-                
-                // Update user stats
-                if (this.services.stats) {
-                    await this.services.stats.trackUser({
-                        userId: userId,
-                        username: username,
-                        firstName: ctx.from.first_name,
-                        lastName: ctx.from.last_name,
-                        lastActive: new Date()
-                    });
+
+                // Track user stats if available
+                if (this.services && this.services.stats) {
+                    try {
+                        await this.services.stats.trackUser({
+                            userId: userId,
+                            username: username,
+                            firstName: ctx.from.first_name,
+                            lastName: ctx.from.last_name,
+                            lastActive: new Date()
+                        });
+                    } catch (err) {
+                        console.log('Stats tracking unavailable:', err.message);
+                    }
                 }
-                
+
                 await this.showMainMenu(ctx);
             } catch (error) {
                 console.error('Start command error:', error);
-                await ctx.reply('❌ Welcome! Something went wrong, but I\'m still here to help.');
+                await ctx.reply('Welcome! Something went wrong, but I am still here to help.');
             }
         });
     }
 
-    /**
-     * Show enhanced main menu with dynamic content
-     */
     async showMainMenu(ctx) {
-        const userId = ctx.from.id;
         const username = ctx.from.username || ctx.from.first_name || 'User';
-        
-        // Get user context and statistics
-        const userStats = await this.getUserStats(userId);
-        const recentActivity = await this.getRecentActivity(userId);
-        
-        // Create personalized welcome message
-        const welcomeMessage = await this.createWelcomeMessage(username, userStats, recentActivity);
-        
-        // Generate smart keyboard based on user context
-        const keyboard = await this.createSmartKeyboard(userStats, recentActivity);
-        
+        const welcomeMessage = this.createSimpleWelcomeMessage(username);
+        const keyboard = this.createMainKeyboard();
+
         if (ctx.callbackQuery) {
-            await ctx.editMessageText(welcomeMessage, {
-                parse_mode: 'Markdown',
-                reply_markup: keyboard
-            });
+            try {
+                await ctx.editMessageText(welcomeMessage, {
+                    parse_mode: 'Markdown',
+                    reply_markup: keyboard
+                });
+            } catch (err) {
+                await ctx.reply(welcomeMessage, {
+                    parse_mode: 'Markdown',
+                    reply_markup: keyboard
+                });
+            }
         } else {
             await ctx.reply(welcomeMessage, {
                 parse_mode: 'Markdown',
@@ -69,162 +65,44 @@ class StartMenuHandler {
             });
         }
     }
-    
-    /**
-     * Get user statistics and context
-     */
-    async getUserStats(userId) {
-        try {
-            const [drafts, published, totalViews] = await Promise.all([
-                this.db.collection('news_articles').countDocuments({ 
-                    author_id: userId, 
-                    status: 'draft' 
-                }),
-                this.db.collection('news_articles').countDocuments({ 
-                    author_id: userId, 
-                    status: 'published' 
-                }),
-                this.db.collection('news_articles').aggregate([
-                    { $match: { author_id: userId } },
-                    { $group: { _id: null, totalViews: { $sum: '$views' } } }
-                ]).toArray()
-            ]);
-            
-            return {
-                drafts,
-                published,
-                totalViews: totalViews[0]?.totalViews || 0,
-                isNewUser: drafts === 0 && published === 0
-            };
-        } catch (error) {
-            console.error('Error fetching user stats:', error);
-            return { drafts: 0, published: 0, totalViews: 0, isNewUser: true };
-        }
+
+    createSimpleWelcomeMessage(username) {
+        return `🌟 *Welcome to Zone News Bot, ${username}!*
+
+📰 Your Complete News Management Platform
+
+*Quick Actions:*
+• 📝 Create and manage articles
+• 🔗 Submit articles via link
+• 🚀 Post to @ZoneNewsAdl
+• 📊 Track performance
+• 🔔 Manage notifications
+
+Choose an option below to get started:`.trim();
     }
-    
-    /**
-     * Get recent user activity
-     */
-    async getRecentActivity(userId) {
-        try {
-            const recentDraft = await this.db.collection('news_articles')
-                .findOne({ 
-                    author_id: userId, 
-                    status: 'draft' 
-                }, { 
-                    sort: { updated_at: -1 } 
-                });
-                
-            const lastPost = await this.db.collection('posted_to_zone_news')
-                .findOne({ userId }, { sort: { timestamp: -1 } });
-                
-            return {
-                recentDraft,
-                lastPost,
-                hasRecentActivity: !!recentDraft || !!lastPost
-            };
-        } catch (error) {
-            console.error('Error fetching recent activity:', error);
-            return { hasRecentActivity: false };
-        }
+
+    createMainKeyboard() {
+        return {
+            inline_keyboard: [
+                [
+                    { text: '📝 Create Article', callback_data: 'menu_create_article' },
+                    { text: '📰 My Articles', callback_data: 'menu_my_articles' }
+                ],
+                [
+                    { text: '🚀 Post to Channel', callback_data: 'menu_post_channel' },
+                    { text: '📊 Analytics', callback_data: 'menu_analytics' }
+                ],
+                [
+                    { text: '🔔 Notifications', callback_data: 'menu_notifications' },
+                    { text: '⚙️ Settings', callback_data: 'menu_settings' }
+                ],
+                [
+                    { text: 'ℹ️ Help', callback_data: 'menu_help' }
+                ]
+            ]
+        };
     }
-    
-    /**
-     * Create personalized welcome message
-     */
-    async createWelcomeMessage(username, userStats, recentActivity) {
-        const timeOfDay = this.getTimeOfDay();
-        let welcomeMessage = `${timeOfDay} **${username}!** 👋\n\n`;
-        
-        if (userStats.isNewUser) {
-            welcomeMessage += `🌟 **Welcome to Zone News Bot!**\n` +
-                            `Your journey in content creation starts here.\n\n` +
-                            `💡 **Quick Start Guide:**\n` +
-                            `1️⃣ Create your first article\n` +
-                            `2️⃣ Publish to channels\n` +
-                            `3️⃣ Track engagement\n\n`;
-        } else {
-            welcomeMessage += `📊 **Your Content Dashboard**\n`;
-            
-            if (userStats.drafts > 0) {
-                welcomeMessage += `📝 ${userStats.drafts} draft${userStats.drafts > 1 ? 's' : ''} waiting\n`;
-            }
-            
-            if (userStats.published > 0) {
-                welcomeMessage += `📰 ${userStats.published} article${userStats.published > 1 ? 's' : ''} published\n`;
-            }
-            
-            if (userStats.totalViews > 0) {
-                welcomeMessage += `👁️ ${userStats.totalViews.toLocaleString()} total views\n`;
-            }
-            
-            if (recentActivity.recentDraft) {
-                const draftTitle = recentActivity.recentDraft.title.substring(0, 30);
-                welcomeMessage += `\n🔄 **Continue**: "${draftTitle}${recentActivity.recentDraft.title.length > 30 ? '...' : ''}"\n`;
-            }
-            
-            welcomeMessage += `\n`;
-        }
-        
-        welcomeMessage += `🚀 **What would you like to do?**`;
-        
-        return welcomeMessage;
-    }
-    
-    /**
-     * Create smart keyboard based on user context
-     */
-    async createSmartKeyboard(userStats, recentActivity) {
-        const keyboard = { inline_keyboard: [] };
-        
-        // Row 1: Primary actions (dynamic based on user)
-        const primaryRow = [];
-        
-        if (userStats.isNewUser) {
-            primaryRow.push({ text: '🌟 Get Started', callback_data: 'quick_start_new' });
-            primaryRow.push({ text: '✍️ Create Article', callback_data: 'cmd_newarticle' });
-        } else if (recentActivity.recentDraft) {
-            primaryRow.push({ text: '🔄 Continue Draft', callback_data: `edit_draft:${recentActivity.recentDraft._id}` });
-            primaryRow.push({ text: '✍️ New Article', callback_data: 'cmd_newarticle' });
-        } else {
-            primaryRow.push({ text: '⚡ Quick Start', callback_data: 'quick_start' });
-            primaryRow.push({ text: '✍️ Create Article', callback_data: 'cmd_newarticle' });
-        }
-        keyboard.inline_keyboard.push(primaryRow);
-        
-        // Row 2: Content management (with counters)
-        const contentRow = [];
-        const draftsText = userStats.drafts > 0 ? `📝 My Drafts (${userStats.drafts})` : '📝 My Drafts';
-        contentRow.push({ text: draftsText, callback_data: 'cmd_drafts' });
-        contentRow.push({ text: '📤 Post Article', callback_data: 'quick_post' });
-        keyboard.inline_keyboard.push(contentRow);
-        
-        // Row 3: Discovery and analytics
-        const discoveryRow = [];
-        discoveryRow.push({ text: '🔍 Search Articles', callback_data: 'cmd_search' });
-        discoveryRow.push({ text: '📊 Trending Now', callback_data: 'cmd_trending' });
-        keyboard.inline_keyboard.push(discoveryRow);
-        
-        // Row 4: Management (only for active users)
-        if (!userStats.isNewUser || userStats.published > 0) {
-            const managementRow = [];
-            managementRow.push({ text: '📢 Channels', callback_data: 'channel_mgmt' });
-            managementRow.push({ text: '📈 Analytics', callback_data: 'user_analytics' });
-            keyboard.inline_keyboard.push(managementRow);
-        }
-        
-        // Row 5: Support and settings
-        const supportRow = [];
-        supportRow.push({ text: '⚙️ Settings', callback_data: 'user_settings' });
-        supportRow.push({ text: '❓ Help', callback_data: 'help_menu' });
-        keyboard.inline_keyboard.push(supportRow);
-        
-        return keyboard;
-    }
-    
-    /**
-     * Get time-appropriate greeting
-     */
+
     getTimeOfDay() {
         const hour = new Date().getHours();
         if (hour < 12) return '🌅 Good morning';
