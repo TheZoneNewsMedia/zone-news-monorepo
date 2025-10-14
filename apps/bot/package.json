@@ -18,7 +18,7 @@
     "express-rate-limit": "^7.1.5",
     "express-validator": "^7.0.1",
     "helmet": "^7.1.0",
-    "joi": "^18.0.1",
+    "joi": "^17.9.2",
     "mongoose": "^8.4.4",
     "telegraf": "^4.16.3",
     "axios": "^1.6.7",
