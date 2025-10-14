@@ -1,0 +1,21 @@
+{
+  "production": {
+    "bot": "apps/bot/src/server.js",
+    "api": "apps/api/src/server.js",
+    "cms": "apps/cms",
+    "miniapp": "apps/miniapp",
+    "admin": "apps/admin"
+  },
+  "services": {
+    "news": "services/news",
+    "ai": "services/ai",
+    "users": "services/users",
+    "channels": "services/channels",
+    "analytics": "services/analytics",
+    "payments": "services/payments"
+  },
+  "archived": {
+    "location": "archive-consolidated/",
+    "categories": ["bots", "apis", "services", "configs", "html"]
+  }
+}

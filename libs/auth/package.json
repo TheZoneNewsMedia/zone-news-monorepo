@@ -1,0 +1,10 @@
+{
+  "name": "@zone/auth-lib",
+  "version": "1.0.0",
+  "description": "Shared authentication library",
+  "main": "index.js",
+  "dependencies": {
+    "jsonwebtoken": "^9.0.2",
+    "axios": "^1.6.2"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@zone-news/article-processor",
+  "version": "1.0.0",
+  "description": "Article processing service for transforming raw telegram posts to news articles",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "start:continuous": "MODE=continuous node index.js",
+    "dev": "nodemon index.js",
+    "test": "jest",
+    "process:once": "node index.js",
+    "process:daemon": "pm2 start ecosystem.config.js"
+  },
+  "dependencies": {
+    "mongodb": "^6.3.0",
+    "node-cron": "^3.0.3",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "jest": "^29.7.0"
+  },
+  "keywords": [
+    "zone-news",
+    "article-processor",
+    "content-pipeline"
+  ],
+  "author": "Zone News",
+  "license": "MIT"
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@zone/bot",
+  "version": "2.0.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon index.js",
+    "start": "NODE_ENV=production node index.js",
+    "restart": "pm2 restart zone-telegram-bot",
+    "status": "pm2 status zone-telegram-bot",
+    "logs": "pm2 logs zone-telegram-bot --lines 50",
+    "health": "curl -s http://localhost:3002/health",
+    "clean": "rm -rf node_modules/.cache && rm -rf logs/*.log"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "joi": "^18.0.1",
+    "mongoose": "^8.4.4",
+    "telegraf": "^4.16.3",
+    "axios": "^1.6.7",
+    "jsdom": "^24.0.0",
+    "@mozilla/readability": "^0.5.0",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}

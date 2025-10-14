@@ -1,0 +1,17 @@
+{
+  "name": "@zone/subscription-service",
+  "version": "1.0.0",
+  "description": "Subscription and payment microservice",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mongodb": "^6.3.0",
+    "stripe": "^14.5.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  }
+}

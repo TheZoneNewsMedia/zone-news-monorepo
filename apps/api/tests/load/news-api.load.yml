@@ -1,0 +1,137 @@
+config:
+  target: 'http://67.219.107.230:3001'
+  phases:
+    # Warm-up phase
+    - duration: 30
+      arrivalRate: 5
+      name: "Warm-up"
+    # Load test phase
+    - duration: 60
+      arrivalRate: 20
+      name: "Sustained load"
+    # Spike test phase  
+    - duration: 30
+      arrivalRate: 50
+      name: "Spike load"
+    # Cool-down phase
+    - duration: 30
+      arrivalRate: 5
+      name: "Cool-down"
+  processor: "./load-test.processor.js"
+  
+scenarios:
+  - name: "News API Load Test"
+    weight: 100
+    flow:
+      # Health check
+      - get:
+          url: "/health"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+      
+      # Basic news fetch
+      - get:
+          url: "/api/news"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+            - hasProperty: "success"
+            - hasProperty: "articles"
+          capture:
+            - json: "$.articles[0].id"
+              as: "firstArticleId"
+      
+      # News with filtering
+      - get:
+          url: "/api/news?category=business&scope=local&limit=10"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+      
+      # Search functionality
+      - get:
+          url: "/api/news?search=Adelaide&limit=5"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+      
+      # Trending articles
+      - get:
+          url: "/api/trending"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+            - hasProperty: "trending"
+      
+      # Breaking news
+      - get:
+          url: "/api/breaking" 
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+            - hasProperty: "breaking"
+      
+      # Statistics
+      - get:
+          url: "/api/stats"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+            - hasProperty: "stats"
+
+  - name: "Rate Limiting Test"
+    weight: 20
+    flow:
+      # Test rate limiting by making rapid requests
+      - loop:
+          - get:
+              url: "/api/news"
+              expect:
+                - statusCode: [200, 429]
+        count: 35  # Should trigger rate limit (30 per minute)
+          
+  - name: "Cache Performance Test"
+    weight: 15
+    flow:
+      # First request (cache miss)
+      - get:
+          url: "/api/news?category=economics"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+      
+      # Second request (should be cache hit)
+      - get:
+          url: "/api/news?category=economics"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+            - header: "x-cache"
+
+  - name: "Error Handling Test"
+    weight: 10
+    flow:
+      # Invalid category
+      - get:
+          url: "/api/news?category=invalid_category"
+          expect:
+            - statusCode: 200  # Should still work, just filters nothing
+            
+      # Invalid pagination
+      - get:
+          url: "/api/news?page=-1"
+          expect:
+            - statusCode: 200  # Should default to page 1
+            
+      # Large limit (should cap at max)
+      - get:
+          url: "/api/news?limit=1000"
+          expect:
+            - statusCode: 200
+            
+      # XSS attempt in search
+      - get:
+          url: "/api/news?search=<script>alert('xss')</script>"
+          expect:
+            - statusCode: 200  # Should handle gracefully

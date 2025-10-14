@@ -1,0 +1,663 @@
+openapi: 3.0.3
+info:
+  title: Zone News API
+  description: |
+    Zone News API provides access to news articles from the @ZoneNewsAdl Telegram channel.
+    
+    ## Features
+    - News article retrieval with advanced filtering
+    - Trending and breaking news endpoints
+    - Real-time statistics and analytics
+    - Multi-tier rate limiting with API key support
+    - Redis-powered caching for optimal performance
+    - Comprehensive error handling and monitoring
+    
+    ## Authentication
+    
+    ### Public Access
+    Public endpoints have rate limits based on IP address:
+    - General endpoints: 100 requests per 15 minutes
+    - News endpoints: 30 requests per minute
+    - Search endpoints: 10 requests per minute
+    
+    ### API Key Access
+    For higher rate limits and premium features, include API key in headers:
+    ```
+    X-API-Key: your-api-key-here
+    ```
+    
+    ## Rate Limiting
+    
+    All endpoints implement multi-tier rate limiting:
+    - **Standard Users**: Base rate limits
+    - **Premium Users**: 2x rate limits with API key
+    - **Suspicious IPs**: 0.5x rate limits (automated detection)
+    
+    Rate limit headers are included in all responses:
+    - `X-RateLimit-Limit`: Request limit for current window
+    - `X-RateLimit-Remaining`: Remaining requests in current window
+    - `X-RateLimit-Reset`: Time when rate limit resets
+    
+  version: 1.0.0
+  contact:
+    name: Zone News Support
+    url: https://t.me/ZoneNewsAdl
+  license:
+    name: MIT
+    
+servers:
+  - url: http://67.219.107.230:3001/api
+    description: Production server
+  - url: http://localhost:3001/api
+    description: Development server
+
+tags:
+  - name: News
+    description: News article endpoints
+  - name: Trending
+    description: Trending content endpoints  
+  - name: Statistics
+    description: Analytics and statistics
+  - name: Health
+    description: Health monitoring
+  - name: Admin
+    description: Administrative endpoints (restricted)
+
+paths:
+  /news:
+    get:
+      tags:
+        - News
+      summary: Get news articles
+      description: |
+        Retrieve news articles with optional filtering and pagination.
+        
+        **Caching**: Results are cached for 5 minutes for optimal performance.
+        **Rate Limit**: 30 requests per minute per IP.
+      parameters:
+        - name: category
+          in: query
+          description: Filter by news category
+          required: false
+          schema:
+            type: string
+            enum: [all, business, economics, finance, property, government, health, innovations, truecrime, analysis]
+            default: all
+        - name: scope
+          in: query
+          description: Filter by geographic scope
+          required: false
+          schema:
+            type: string
+            enum: [all, local, national, global]
+            default: all
+        - name: city
+          in: query
+          description: Filter by city (only effective when scope=local)
+          required: false
+          schema:
+            type: string
+            enum: [Adelaide, Sydney, Melbourne, Brisbane, Perth, Darwin, Hobart, Canberra]
+            default: Adelaide
+        - name: page
+          in: query
+          description: Page number for pagination
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Number of articles per page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+        - name: search
+          in: query
+          description: Search query for title and content
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+      responses:
+        '200':
+          description: Successful response
+          headers:
+            X-Cache:
+              description: Cache status (HIT/MISS)
+              schema:
+                type: string
+                enum: [HIT, MISS]
+            X-RateLimit-Limit:
+              description: Request limit for current window
+              schema:
+                type: integer
+            X-RateLimit-Remaining:
+              description: Remaining requests in current window
+              schema:
+                type: integer
+            X-RateLimit-Reset:
+              description: Time when rate limit resets
+              schema:
+                type: string
+                format: date-time
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - articles
+                  - totalArticles
+                  - totalPages
+                  - currentPage
+                  - metadata
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  articles:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NewsArticle'
+                  totalArticles:
+                    type: integer
+                    description: Total number of articles in response
+                    example: 15
+                  totalPages:
+                    type: integer
+                    description: Total number of pages available
+                    example: 3
+                  currentPage:
+                    type: integer
+                    description: Current page number
+                    example: 1
+                  metadata:
+                    type: object
+                    properties:
+                      scope:
+                        type: string
+                        example: "all"
+                      category:
+                        type: string
+                        example: "all"
+                      city:
+                        type: string
+                        nullable: true
+                        example: "Adelaide"
+                      source:
+                        type: string
+                        example: "Zone News Adelaide Channel"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /trending:
+    get:
+      tags:
+        - Trending
+      summary: Get trending articles
+      description: |
+        Retrieve the top 10 trending articles based on view count.
+        
+        **Caching**: Results are cached for 10 minutes.
+        **Rate Limit**: 30 requests per minute per IP.
+      responses:
+        '200':
+          description: Successful response
+          headers:
+            X-Cache:
+              description: Cache status (HIT/MISS)
+              schema:
+                type: string
+                enum: [HIT, MISS]
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - trending
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  trending:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - id
+                        - title
+                        - views
+                        - category
+                      properties:
+                        id:
+                          type: string
+                          example: "60f7c1b8e4b0f4a2c8d9e123"
+                        title:
+                          type: string
+                          example: "Adelaide Tech Startup Raises $50M"
+                        views:
+                          type: integer
+                          example: 1250
+                        category:
+                          type: string
+                          example: "innovations"
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /breaking:
+    get:
+      tags:
+        - News
+      summary: Get breaking news
+      description: |
+        Retrieve the latest breaking news from the last 24 hours.
+        
+        **Caching**: Results are cached for 2 minutes.
+        **Rate Limit**: No specific rate limit (uses general public limit).
+      responses:
+        '200':
+          description: Successful response
+          headers:
+            X-Cache:
+              description: Cache status (HIT/MISS)
+              schema:
+                type: string
+                enum: [HIT, MISS]
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - breaking
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  breaking:
+                    type: array
+                    maxItems: 5
+                    items:
+                      type: object
+                      required:
+                        - id
+                        - title
+                        - content
+                        - publishedAt
+                        - category
+                      properties:
+                        id:
+                          type: string
+                          example: "60f7c1b8e4b0f4a2c8d9e123"
+                        title:
+                          type: string
+                          example: "Major Infrastructure Project Announced for Adelaide"
+                        content:
+                          type: string
+                          description: Truncated content (150 characters + "...")
+                          example: "The South Australian government has announced a major infrastructure project that will transform Adelaide's transport network..."
+                        publishedAt:
+                          type: string
+                          format: date-time
+                          example: "2025-08-21T10:30:00Z"
+                        category:
+                          type: string
+                          example: "government"
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /stats:
+    get:
+      tags:
+        - Statistics
+      summary: Get news statistics
+      description: |
+        Retrieve statistics about the news database including total articles,
+        today's articles, and breakdown by category.
+        
+        **Caching**: Results are cached for 15 minutes.
+        **Rate Limit**: No specific rate limit (uses general public limit).
+      responses:
+        '200':
+          description: Successful response
+          headers:
+            X-Cache:
+              description: Cache status (HIT/MISS)
+              schema:
+                type: string
+                enum: [HIT, MISS]
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - stats
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  stats:
+                    type: object
+                    required:
+                      - totalArticles
+                      - todayArticles
+                      - categories
+                    properties:
+                      totalArticles:
+                        type: integer
+                        description: Total number of articles in database
+                        example: 1247
+                      todayArticles:
+                        type: integer
+                        description: Number of articles published today
+                        example: 23
+                      categories:
+                        type: object
+                        description: Breakdown of articles by category
+                        properties:
+                          business:
+                            type: integer
+                            example: 156
+                          economics:
+                            type: integer
+                            example: 89
+                          finance:
+                            type: integer
+                            example: 134
+                          property:
+                            type: integer
+                            example: 78
+                          government:
+                            type: integer
+                            example: 167
+                          health:
+                            type: integer
+                            example: 123
+                          innovations:
+                            type: integer
+                            example: 145
+                          truecrime:
+                            type: integer
+                            example: 67
+                          analysis:
+                            type: integer
+                            example: 92
+                          general:
+                            type: integer
+                            example: 196
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: |
+        Simple health check endpoint to verify API status and database connectivity.
+        
+        **Rate Limit**: 60 requests per minute per IP.
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                  - service
+                  - database
+                properties:
+                  status:
+                    type: string
+                    example: "ok"
+                  service:
+                    type: string
+                    example: "Zone News API"
+                  database:
+                    type: string
+                    enum: [connected, disconnected]
+                    example: "connected"
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "error"
+                  service:
+                    type: string
+                    example: "Zone News API"
+                  database:
+                    type: string
+                    example: "disconnected"
+                  error:
+                    type: string
+                    example: "Database connection failed"
+
+components:
+  schemas:
+    NewsArticle:
+      type: object
+      required:
+        - id
+        - title
+        - content
+        - category
+        - scope
+        - city
+        - source
+        - published_date
+        - views
+      properties:
+        id:
+          type: string
+          description: Unique article identifier
+          example: "60f7c1b8e4b0f4a2c8d9e123"
+        title:
+          type: string
+          description: Article headline
+          example: "Adelaide Startup Raises $10M in Series A Funding"
+        content:
+          type: string
+          description: Full article content
+          example: "A local Adelaide technology startup has successfully raised $10 million in Series A funding..."
+        excerpt:
+          type: string
+          description: Article summary or first 200 characters
+          example: "A local Adelaide technology startup has successfully raised $10 million in Series A funding from leading Australian venture capital firms..."
+        category:
+          type: string
+          description: Automatically categorized article type
+          enum: [business, economics, finance, property, government, health, innovations, truecrime, analysis, general]
+          example: "innovations"
+        scope:
+          type: string
+          description: Geographic scope of the article
+          enum: [local, national, global]
+          example: "local"
+        city:
+          type: string
+          description: Primary city relevant to the article
+          example: "Adelaide"
+        source:
+          type: string
+          description: News source
+          example: "Zone News"
+        published_date:
+          type: string
+          format: date-time
+          description: Publication timestamp
+          example: "2025-08-21T09:45:00Z"
+        views:
+          type: integer
+          description: Number of views/engagements
+          example: 847
+        reactions:
+          type: object
+          description: User reactions to the article
+          properties:
+            likes:
+              type: integer
+              example: 23
+            hearts:
+              type: integer
+              example: 15
+            shares:
+              type: integer
+              example: 8
+        isPremium:
+          type: boolean
+          description: Whether article requires premium access
+          example: false
+        messageId:
+          type: integer
+          nullable: true
+          description: Telegram message ID if available
+          example: 12345
+        channelUrl:
+          type: string
+          nullable: true
+          description: Direct link to Telegram channel message
+          example: "https://t.me/ZoneNewsAdl/12345"
+
+    Error:
+      type: object
+      required:
+        - error
+        - code
+        - timestamp
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+          example: "Rate limit exceeded"
+        code:
+          type: string
+          description: Machine-readable error code
+          example: "RATE_LIMIT_EXCEEDED"
+        timestamp:
+          type: string
+          format: date-time
+          description: Error occurrence timestamp
+          example: "2025-08-21T10:30:00Z"
+        details:
+          type: object
+          description: Additional error context
+          example:
+            retryAfter: "2025-08-21T10:31:00Z"
+            limit: 30
+            window: "1 minute"
+        requestId:
+          type: string
+          description: Unique request identifier for debugging
+          example: "req_12345abcdef"
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Invalid parameter value"
+            code: "INVALID_PARAMETER"
+            timestamp: "2025-08-21T10:30:00Z"
+            details:
+              parameter: "category"
+              value: "invalid_category"
+              allowed: ["business", "economics", "finance", "property", "government", "health", "innovations", "truecrime", "analysis", "general"]
+
+    RateLimitExceeded:
+      description: Rate limit exceeded
+      headers:
+        X-RateLimit-Limit:
+          description: Request limit for current window
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          description: Remaining requests in current window (will be 0)
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          description: Time when rate limit resets
+          schema:
+            type: string
+            format: date-time
+        Retry-After:
+          description: Seconds to wait before retrying
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Rate limit exceeded for news endpoints"
+            code: "RATE_LIMIT_EXCEEDED"
+            timestamp: "2025-08-21T10:30:00Z"
+            details:
+              retryAfter: "2025-08-21T10:31:00Z"
+              limit: 30
+              window: "1 minute"
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "An internal server error occurred"
+            code: "INTERNAL_SERVER_ERROR"
+            timestamp: "2025-08-21T10:30:00Z"
+            requestId: "req_12345abcdef"
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API key for premium access and higher rate limits.
+        
+        **Premium Benefits:**
+        - 2x higher rate limits
+        - Priority request processing
+        - Access to premium content
+        - Advanced analytics (future feature)
+        
+        **Usage:**
+        ```
+        X-API-Key: your-api-key-here
+        ```
+
+security:
+  - ApiKeyAuth: []
+  - {} # Allow unauthenticated access
+
+externalDocs:
+  description: Zone News Telegram Channel
+  url: https://t.me/ZoneNewsAdl

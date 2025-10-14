@@ -1,0 +1,28 @@
+{
+  "rules": [
+    {
+      "name": "High Memory Usage",
+      "condition": "memory_usage > 90",
+      "severity": "warning",
+      "message": "Memory usage is above 90%"
+    },
+    {
+      "name": "Service Down",
+      "condition": "service_status == 'DOWN'",
+      "severity": "critical",
+      "message": "Service {service_name} is down"
+    },
+    {
+      "name": "High Response Time",
+      "condition": "response_time > 2000",
+      "severity": "warning",
+      "message": "Service {service_name} response time > 2s"
+    },
+    {
+      "name": "Too Many Restarts",
+      "condition": "restart_count > 5",
+      "severity": "error",
+      "message": "Service {service_name} restarted {restart_count} times"
+    }
+  ]
+}

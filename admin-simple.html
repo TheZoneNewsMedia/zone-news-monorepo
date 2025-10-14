@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zone News Admin Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            color: #2c3e50;
+        }
+        
+        .admin-container {
+            display: flex;
+            min-height: 100vh;
+        }
+        
+        .sidebar {
+            width: 250px;
+            background: #2c3e50;
+            color: white;
+        }
+        
+        .sidebar-header {
+            padding: 1.5rem;
+            background: #1a252f;
+            border-bottom: 1px solid #34495e;
+        }
+        
+        .sidebar-header h2 {
+            font-size: 1.25rem;
+        }
+        
+        .sidebar-nav {
+            padding: 1rem 0;
+        }
+        
+        .nav-item {
+            display: block;
+            padding: 0.75rem 1.5rem;
+            color: #ecf0f1;
+            text-decoration: none;
+            transition: background 0.2s;
+            cursor: pointer;
+        }
+        
+        .nav-item:hover {
+            background: #34495e;
+        }
+        
+        .nav-item.active {
+            background: #3498db;
+            border-left: 4px solid #2980b9;
+            padding-left: calc(1.5rem - 4px);
+        }
+        
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .top-bar {
+            background: white;
+            padding: 1rem 2rem;
+            border-bottom: 1px solid #e1e8ed;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .content {
+            padding: 2rem;
+            flex: 1;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .stats-card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .stats-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            transition: all 0.2s;
+        }
+        
+        .stats-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .stats-icon {
+            font-size: 1.5rem;
+        }
+        
+        .stats-label {
+            font-size: 0.875rem;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .stats-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #1e293b;
+            margin: 0.5rem 0;
+        }
+        
+        .stats-growth {
+            font-size: 0.875rem;
+            color: #10b981;
+        }
+        
+        .stats-growth.negative {
+            color: #ef4444;
+        }
+        
+        .charts-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .chart-container {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .chart-container h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            color: #2c3e50;
+        }
+        
+        .users-table {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th {
+            background: #f8fafc;
+            padding: 0.75rem 1rem;
+            text-align: left;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        td {
+            padding: 1rem;
+            font-size: 0.875rem;
+            color: #334155;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        
+        tbody tr:hover {
+            background: #f8fafc;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .badge-free {
+            background: #f1f5f9;
+            color: #64748b;
+        }
+        
+        .badge-pro {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .badge-business {
+            background: #ede9fe;
+            color: #6d28d9;
+        }
+        
+        .badge-enterprise {
+            background: #fef3c7;
+            color: #b45309;
+        }
+        
+        .view-section {
+            display: none;
+        }
+        
+        .view-section.active {
+            display: block;
+        }
+        
+        @media (max-width: 768px) {
+            .admin-container {
+                flex-direction: column;
+            }
+            
+            .sidebar {
+                width: 100%;
+            }
+            
+            .charts-row {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-container">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h2>Zone News Admin</h2>
+            </div>
+            <nav class="sidebar-nav">
+                <a class="nav-item active" onclick="showView('dashboard')">📊 Dashboard</a>
+                <a class="nav-item" onclick="showView('users')">👥 Users</a>
+                <a class="nav-item" onclick="showView('articles')">📰 Articles</a>
+                <a class="nav-item" onclick="showView('analytics')">📈 Analytics</a>
+                <a class="nav-item" onclick="showView('settings')">⚙️ Settings</a>
+            </nav>
+        </aside>
+        
+        <main class="main-content">
+            <header class="top-bar">
+                <h1 id="pageTitle">Dashboard</h1>
+                <div>Admin User</div>
+            </header>
+            
+            <div class="content">
+                <!-- Dashboard View -->
+                <div id="dashboard" class="view-section active">
+                    <div class="stats-grid">
+                        <div class="stats-card">
+                            <div class="stats-header">
+                                <span class="stats-icon">👥</span>
+                                <span class="stats-label">Total Users</span>
+                            </div>
+                            <div class="stats-value">2,456</div>
+                            <div class="stats-growth">+12% from last month</div>
+                        </div>
+                        
+                        <div class="stats-card">
+                            <div class="stats-header">
+                                <span class="stats-icon">🔥</span>
+                                <span class="stats-label">Active Today</span>
+                            </div>
+                            <div class="stats-value">892</div>
+                        </div>
+                        
+                        <div class="stats-card">
+                            <div class="stats-header">
+                                <span class="stats-icon">📰</span>
+                                <span class="stats-label">Total Articles</span>
+                            </div>
+                            <div class="stats-value">15,234</div>
+                            <div class="stats-growth">+8% from last month</div>
+                        </div>
+                        
+                        <div class="stats-card">
+                            <div class="stats-header">
+                                <span class="stats-icon">💰</span>
+                                <span class="stats-label">Monthly Revenue</span>
+                            </div>
+                            <div class="stats-value">$4,589</div>
+                            <div class="stats-growth">+23% from last month</div>
+                        </div>
+                    </div>
+                    
+                    <div class="charts-row">
+                        <div class="chart-container">
+                            <h2>User Growth</h2>
+                            <canvas id="userGrowthChart" height="200"></canvas>
+                        </div>
+                        
+                        <div class="chart-container">
+                            <h2>Tier Distribution</h2>
+                            <div style="padding: 2rem;">
+                                <div>Free: 1,823 (74%)</div>
+                                <div>Pro: 412 (17%)</div>
+                                <div>Business: 189 (8%)</div>
+                                <div>Enterprise: 32 (1%)</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Users View -->
+                <div id="users" class="view-section">
+                    <div class="users-table">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>User</th>
+                                    <th>Telegram ID</th>
+                                    <th>Tier</th>
+                                    <th>Joined</th>
+                                    <th>Articles Read</th>
+                                </tr>
+                            </thead>
+                            <tbody id="usersTableBody">
+                                <!-- Populated by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Articles View -->
+                <div id="articles" class="view-section">
+                    <h2>Articles Management</h2>
+                    <p>Total articles in database: <span id="articleCount">Loading...</span></p>
+                    <div id="articlesList"></div>
+                </div>
+                
+                <!-- Analytics View -->
+                <div id="analytics" class="view-section">
+                    <h2>Analytics Dashboard</h2>
+                    <div class="stats-grid">
+                        <div class="stats-card">
+                            <div class="stats-label">Page Views Today</div>
+                            <div class="stats-value">12,345</div>
+                        </div>
+                        <div class="stats-card">
+                            <div class="stats-label">API Requests</div>
+                            <div class="stats-value">45,678</div>
+                        </div>
+                        <div class="stats-card">
+                            <div class="stats-label">Bot Commands</div>
+                            <div class="stats-value">3,456</div>
+                        </div>
+                        <div class="stats-card">
+                            <div class="stats-label">Error Rate</div>
+                            <div class="stats-value">0.02%</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Settings View -->
+                <div id="settings" class="view-section">
+                    <h2>System Settings</h2>
+                    <div class="chart-container">
+                        <h3>Bot Configuration</h3>
+                        <p>Token: ****...****</p>
+                        <p>Webhook: Active</p>
+                        <p>API Endpoint: http://67.219.107.230:3001</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <script>
+        // Mock users data
+        const users = [
+            { username: 'john_doe', telegramId: 123456789, tier: 'pro', joined: '2025-07-15', articles: 245 },
+            { username: 'sarah_smith', telegramId: 987654321, tier: 'business', joined: '2025-06-20', articles: 892 },
+            { username: 'mike_wilson', telegramId: 456789123, tier: 'free', joined: '2025-08-01', articles: 45 },
+            { username: 'emma_jones', telegramId: 789123456, tier: 'pro', joined: '2025-07-28', articles: 156 },
+            { username: 'alex_brown', telegramId: 321654987, tier: 'enterprise', joined: '2025-05-10', articles: 2341 }
+        ];
+        
+        function showView(viewName) {
+            // Hide all views
+            document.querySelectorAll('.view-section').forEach(section => {
+                section.classList.remove('active');
+            });
+            
+            // Show selected view
+            document.getElementById(viewName).classList.add('active');
+            
+            // Update nav
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // Update title
+            const titles = {
+                dashboard: 'Dashboard',
+                users: 'User Management',
+                articles: 'Articles',
+                analytics: 'Analytics',
+                settings: 'Settings'
+            };
+            document.getElementById('pageTitle').textContent = titles[viewName];
+            
+            // Load view-specific data
+            if (viewName === 'users') {
+                loadUsers();
+            } else if (viewName === 'articles') {
+                loadArticles();
+            }
+        }
+        
+        function loadUsers() {
+            const tbody = document.getElementById('usersTableBody');
+            tbody.innerHTML = users.map(user => `
+                <tr>
+                    <td>@${user.username}</td>
+                    <td>${user.telegramId}</td>
+                    <td><span class="badge badge-${user.tier}">${user.tier}</span></td>
+                    <td>${user.joined}</td>
+                    <td>${user.articles}</td>
+                </tr>
+            `).join('');
+        }
+        
+        async function loadArticles() {
+            try {
+                const response = await fetch('http://67.219.107.230:3001/api/news');
+                const data = await response.json();
+                
+                document.getElementById('articleCount').textContent = data.totalArticles || 0;
+                
+                if (data.articles) {
+                    const articlesList = document.getElementById('articlesList');
+                    articlesList.innerHTML = '<div class="users-table"><table><thead><tr><th>Title</th><th>Category</th><th>Views</th><th>Date</th></tr></thead><tbody>' +
+                        data.articles.map(article => `
+                            <tr>
+                                <td>${article.title}</td>
+                                <td>${article.category}</td>
+                                <td>${article.views}</td>
+                                <td>${new Date(article.published_date).toLocaleDateString()}</td>
+                            </tr>
+                        `).join('') +
+                        '</tbody></table></div>';
+                }
+            } catch (error) {
+                console.error('Error loading articles:', error);
+                document.getElementById('articleCount').textContent = 'Error loading';
+            }
+        }
+        
+        // Draw simple chart
+        const canvas = document.getElementById('userGrowthChart');
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, 150);
+            ctx.lineTo(50, 140);
+            ctx.lineTo(100, 120);
+            ctx.lineTo(150, 110);
+            ctx.lineTo(200, 90);
+            ctx.lineTo(250, 70);
+            ctx.lineTo(300, 50);
+            ctx.stroke();
+        }
+    </script>
+</body>
+</html>

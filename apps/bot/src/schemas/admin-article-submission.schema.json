@@ -1,0 +1,269 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://thezonenews.com/schemas/admin-article-submission.json",
+  "title": "Admin Article Submission Schema",
+  "description": "JSON format for admins to submit articles directly to Zone News Bot",
+  "version": "1.0.0",
+
+  "definitions": {
+    "MinimalArticle": {
+      "type": "object",
+      "description": "Minimal article submission - AI will enhance the rest",
+      "required": ["title", "content"],
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Article headline",
+          "minLength": 10,
+          "maxLength": 500,
+          "examples": ["Adelaide CBD to Get Major Infrastructure Upgrade"]
+        },
+        "content": {
+          "type": "string",
+          "description": "Full article text content",
+          "minLength": 100,
+          "examples": ["Adelaide's CBD is set to undergo a significant transformation..."]
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Source URL (optional - can be your own website)",
+          "examples": ["https://thezonenews.com/articles/adelaide-infrastructure-2025"]
+        },
+        "imageUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Featured image URL (optional)",
+          "examples": ["https://thezonenews.com/images/adelaide-cbd.jpg"]
+        }
+      }
+    },
+
+    "StandardArticle": {
+      "type": "object",
+      "description": "Standard article submission with more control",
+      "required": ["title", "content", "category"],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 500
+        },
+        "description": {
+          "type": "string",
+          "description": "Article excerpt/summary",
+          "maxLength": 1000,
+          "examples": ["A brief summary of the article that will appear in previews"]
+        },
+        "content": {
+          "type": "string",
+          "minLength": 100
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "imageUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "general",
+            "business",
+            "entertainment",
+            "health",
+            "science",
+            "sports",
+            "technology",
+            "politics",
+            "sport",
+            "environment",
+            "weather"
+          ],
+          "examples": ["business"]
+        },
+        "author": {
+          "type": "string",
+          "description": "Author name",
+          "examples": ["Sarah Johnson", "The Zone News Team"]
+        },
+        "source": {
+          "type": "object",
+          "description": "Source publication details",
+          "properties": {
+            "name": {
+              "type": "string",
+              "examples": ["The Zone News", "Adelaide Advertiser"]
+            },
+            "url": {
+              "type": "string",
+              "format": "uri",
+              "examples": ["https://thezonenews.com"]
+            }
+          }
+        },
+        "tags": {
+          "type": "array",
+          "description": "Article tags for categorisation",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10,
+          "examples": [["adelaide", "infrastructure", "cbd", "development"]]
+        },
+        "publishedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Original publication date (ISO 8601)",
+          "examples": ["2025-01-15T10:30:00+10:30"]
+        }
+      }
+    },
+
+    "AdvancedArticle": {
+      "type": "object",
+      "description": "Advanced submission with full control over all fields",
+      "required": ["title", "content", "category"],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 500
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "content": {
+          "type": "string",
+          "minLength": 100
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "imageUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "general",
+            "business",
+            "entertainment",
+            "health",
+            "science",
+            "sports",
+            "technology",
+            "politics",
+            "sport",
+            "environment",
+            "weather"
+          ]
+        },
+        "author": {
+          "type": "string"
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10
+        },
+        "keywords": {
+          "type": "array",
+          "description": "SEO keywords",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 15
+        },
+        "publishedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "isBreaking": {
+          "type": "boolean",
+          "description": "Mark as breaking news",
+          "default": false
+        },
+        "isPremium": {
+          "type": "boolean",
+          "description": "Premium/subscriber-only content",
+          "default": false
+        },
+        "sentiment": {
+          "type": "object",
+          "description": "Override AI sentiment analysis",
+          "properties": {
+            "score": {
+              "type": "number",
+              "minimum": -1,
+              "maximum": 1
+            },
+            "label": {
+              "type": "string",
+              "enum": ["positive", "negative", "neutral"]
+            }
+          }
+        },
+        "relatedArticleIds": {
+          "type": "array",
+          "description": "MongoDB ObjectIds of related articles",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{24}$"
+          }
+        }
+      }
+    }
+  },
+
+  "oneOf": [
+    { "$ref": "#/definitions/MinimalArticle" },
+    { "$ref": "#/definitions/StandardArticle" },
+    { "$ref": "#/definitions/AdvancedArticle" }
+  ],
+
+  "examples": [
+    {
+      "title": "Adelaide Tech Startup Raises $5M in Funding",
+      "content": "A local Adelaide technology startup focused on renewable energy solutions has secured $5 million in Series A funding. The company, GreenTech Innovations, plans to use the funds to expand its team and accelerate product development. Founded in 2023, the startup has already attracted interest from major Australian energy providers.",
+      "category": "business",
+      "tags": ["startup", "funding", "adelaide", "technology", "renewable-energy"]
+    },
+    {
+      "title": "New Cycling Path Opens Along River Torrens",
+      "content": "The Adelaide City Council has officially opened a new 3km cycling path along the River Torrens, connecting the CBD to West Lakes. The project, which cost $2.3 million, includes LED lighting, rest areas, and improved safety features. Mayor Jane Smith said the path would encourage more residents to cycle and improve connectivity across the city.",
+      "url": "https://thezonenews.com/articles/torrens-cycling-path-2025",
+      "imageUrl": "https://thezonenews.com/images/cycling-path.jpg",
+      "category": "general",
+      "author": "Michael Chen",
+      "source": {
+        "name": "The Zone News",
+        "url": "https://thezonenews.com"
+      },
+      "tags": ["cycling", "adelaide", "infrastructure", "council"],
+      "publishedAt": "2025-01-15T09:00:00+10:30"
+    }
+  ]
+}

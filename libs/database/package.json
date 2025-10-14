@@ -1,0 +1,9 @@
+{
+  "name": "@zone/database-lib",
+  "version": "1.0.0",
+  "description": "Shared database connection library",
+  "main": "index.js",
+  "dependencies": {
+    "mongodb": "^6.3.0"
+  }
+}

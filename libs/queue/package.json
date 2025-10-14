@@ -1,0 +1,9 @@
+{
+  "name": "@zone/queue-lib",
+  "version": "1.0.0",
+  "description": "Shared job queue library",
+  "main": "index.js",
+  "dependencies": {
+    "bull": "^4.11.5"
+  }
+}

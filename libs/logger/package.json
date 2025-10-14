@@ -1,0 +1,6 @@
+{
+  "name": "@zone/logger-lib",
+  "version": "1.0.0",
+  "description": "Shared logging library",
+  "main": "index.js"
+}

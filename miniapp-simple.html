@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Zone News - Your Local News Hub</title>
+    <meta name="description" content="Stay informed with local Adelaide news - Zone News Telegram Mini App">
+    <meta name="theme-color" content="#667eea">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    
+    <!-- Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <!-- Preload critical fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📰%3C/text%3E%3C/svg%3E">
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Skip to content for accessibility -->
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+    
+    <!-- Header -->
+    <header class="header" role="banner">
+        <div class="header-content">
+            <h1 class="header-title">
+                <span class="header-icon" aria-hidden="true">📰</span>
+                Zone News
+            </h1>
+            <p class="header-subtitle">Your Local Adelaide News Hub</p>
+        </div>
+        <div class="header-gradient" aria-hidden="true"></div>
+    </header>
+
+    <!-- Main Content -->
+    <main id="main-content" class="main-content" role="main">
+        <div class="container">
+            <!-- Tier Banner -->
+            <aside class="tier-banner" id="tierBanner" style="display: none;" role="complementary" aria-label="Subscription upgrade banner">
+                <div class="tier-content">
+                    <div class="tier-text">
+                        <strong class="tier-title">Upgrade to Zone Pro</strong>
+                        <div class="tier-features">50 articles/day + AI summaries + breaking news alerts</div>
+                    </div>
+                    <button class="tier-button" onclick="handleUpgrade()" aria-label="Upgrade to Zone Pro subscription">
+                        <span class="tier-price">$14.99</span>
+                        <span class="tier-period">/month</span>
+                    </button>
+                </div>
+                <button class="tier-close" onclick="closeTierBanner()" aria-label="Dismiss upgrade banner">
+                    <span aria-hidden="true">×</span>
+                </button>
+            </aside>
+
+            <!-- Filter Tabs -->
+            <nav class="filter-tabs" role="navigation" aria-label="News categories">
+                <button class="filter-tab active" data-category="all" aria-pressed="true">
+                    <span class="tab-icon" aria-hidden="true">🏠</span>
+                    All News
+                </button>
+                <button class="filter-tab" data-category="local" aria-pressed="false">
+                    <span class="tab-icon" aria-hidden="true">📍</span>
+                    Local
+                </button>
+                <button class="filter-tab" data-category="business" aria-pressed="false">
+                    <span class="tab-icon" aria-hidden="true">💼</span>
+                    Business
+                </button>
+                <button class="filter-tab" data-category="sports" aria-pressed="false">
+                    <span class="tab-icon" aria-hidden="true">⚽</span>
+                    Sports
+                </button>
+            </nav>
+
+            <!-- News Container -->
+            <section class="news-section" aria-label="News articles">
+                <div id="newsContainer" class="news-container">
+                    <div class="loading-state" role="status" aria-live="polite">
+                        <div class="loading-spinner" aria-hidden="true"></div>
+                        <span class="loading-text">Loading latest news...</span>
+                    </div>
+                </div>
+                
+                <!-- Empty State -->
+                <div id="emptyState" class="empty-state" style="display: none;" role="status">
+                    <div class="empty-icon" aria-hidden="true">📰</div>
+                    <h3 class="empty-title">No articles found</h3>
+                    <p class="empty-description">Try refreshing or check back later for the latest news.</p>
+                    <button class="refresh-button" onclick="loadNews()" aria-label="Refresh news articles">
+                        <span aria-hidden="true">🔄</span>
+                        Refresh
+                    </button>
+                </div>
+            </section>
+
+            <!-- Usage Statistics -->
+            <aside class="usage-stats" id="usageStats" style="display: none;" role="complementary" aria-label="Daily usage statistics">
+                <div class="stats-content">
+                    <span class="stats-label">Articles read today:</span>
+                    <div class="stats-progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                        <span class="stats-text" id="statsText">0/10</span>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </main>
+
+    <!-- Bottom Navigation -->
+    <nav class="bottom-nav" role="navigation" aria-label="Main navigation">
+        <button class="nav-item active" data-tab="home" aria-pressed="true" aria-label="Home page">
+            <span class="nav-icon" aria-hidden="true">🏠</span>
+            <span class="nav-label">Home</span>
+        </button>
+        <button class="nav-item" data-tab="saved" aria-pressed="false" aria-label="Saved articles">
+            <span class="nav-icon" aria-hidden="true">📑</span>
+            <span class="nav-label">Saved</span>
+            <span class="nav-badge" id="savedBadge" style="display: none;">0</span>
+        </button>
+        <button class="nav-item" data-tab="trending" aria-pressed="false" aria-label="Trending news">
+            <span class="nav-icon" aria-hidden="true">🔥</span>
+            <span class="nav-label">Trending</span>
+        </button>
+        <button class="nav-item" data-tab="profile" aria-pressed="false" aria-label="User profile">
+            <span class="nav-icon" aria-hidden="true">👤</span>
+            <span class="nav-label">Profile</span>
+        </button>
+    </nav>
+
+    <!-- Article Modal -->
+    <div class="modal-overlay" id="articleModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-content">
+            <header class="modal-header">
+                <h2 id="modal-title" class="modal-title"></h2>
+                <button class="modal-close" onclick="closeArticleModal()" aria-label="Close article">
+                    <span aria-hidden="true">×</span>
+                </button>
+            </header>
+            <div class="modal-body" id="modal-body">
+                <!-- Article content will be injected here -->
+            </div>
+            <footer class="modal-footer">
+                <div class="article-actions">
+                    <button class="action-button" id="saveButton" onclick="toggleSaveArticle()" aria-label="Save article">
+                        <span class="action-icon" aria-hidden="true">📑</span>
+                        <span class="action-text">Save</span>
+                    </button>
+                    <button class="action-button" onclick="shareArticle()" aria-label="Share article">
+                        <span class="action-icon" aria-hidden="true">📤</span>
+                        <span class="action-text">Share</span>
+                    </button>
+                    <div class="reactions" role="group" aria-label="Article reactions">
+                        <button class="reaction-button" data-reaction="👍" onclick="addReaction('👍')" aria-label="Like article">
+                            <span class="reaction-emoji">👍</span>
+                            <span class="reaction-count" id="like-count">0</span>
+                        </button>
+                        <button class="reaction-button" data-reaction="❤️" onclick="addReaction('❤️')" aria-label="Love article">
+                            <span class="reaction-emoji">❤️</span>
+                            <span class="reaction-count" id="love-count">0</span>
+                        </button>
+                    </div>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div class="toast" id="toast" style="display: none;" role="alert" aria-live="assertive">
+        <div class="toast-content">
+            <span class="toast-icon" id="toastIcon"></span>
+            <span class="toast-message" id="toastMessage"></span>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="script.js"></script>
+</body>
+</html>

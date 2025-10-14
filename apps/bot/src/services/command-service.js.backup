@@ -1,0 +1,3743 @@
+/**
+ * Command Service - Handles all bot commands
+ */
+
+const config = require('../config');
+
+class CommandService {
+    constructor(bot, db) {
+        this.bot = bot;
+        this.db = db;
+    }
+    
+    async register() {
+        // Middleware
+        this.bot.use(async (ctx, next) => {
+            if (ctx.from) {
+                ctx.isAdmin = config.adminIds.includes(ctx.from.id);
+            }
+            await next();
+        });
+        
+        // Register commands with Telegram
+        await this.registerBotCommands();
+        
+        // Public commands
+        this.registerPublicCommands();
+        
+        // Admin commands
+        this.registerAdminCommands();
+        
+        // Callback handlers
+        this.registerCallbackHandlers();
+        
+        // Text handler
+        this.registerTextHandler();
+        
+        // Media handler
+        this.registerMediaHandler();
+        
+        // Error handler
+        this.bot.catch((err, ctx) => {
+            console.error('Bot error:', err);
+            ctx.reply('❌ An error occurred').catch(() => {});
+        });
+    }
+    
+    async registerBotCommands() {
+        try {
+            // Set bot commands visible in menu
+            const commands = [
+                { command: 'start', description: 'Start the bot' },
+                { command: 'app', description: 'Open Zone News app' },
+                { command: 'upgrade', description: 'Upgrade your plan' },
+                { command: 'tiers', description: 'View subscription tiers' },
+                { command: 'channel', description: 'Add your channel' },
+                { command: 'group', description: 'Add your group' },
+                { command: 'settings', description: 'Manage settings' }
+            ];
+            
+            // Admin commands (only visible to admins)
+            const adminCommands = [
+                ...commands,
+                { command: 'post', description: 'Post to channels' },
+                { command: 'editpost', description: 'Edit recent posts' },
+                { command: 'destinations', description: 'Manage destinations' },
+                { command: 'analytics', description: 'View analytics' },
+                { command: 'schedule', description: 'Schedule posts' },
+                { command: 'broadcast', description: 'Broadcast message' }
+            ];
+            
+            // Set default commands for all users
+            await this.bot.telegram.setMyCommands(commands);
+            
+            // Set admin commands for admin users
+            for (const adminId of config.adminIds) {
+                await this.bot.telegram.setMyCommands(adminCommands, {
+                    scope: { type: 'chat', chat_id: adminId }
+                });
+            }
+            
+            console.log('✅ Bot commands registered with Telegram');
+        } catch (error) {
+            console.error('Failed to register commands:', error);
+        }
+    }
+    
+    registerPublicCommands() {
+        // /start
+        this.bot.command('start', async (ctx) => {
+            // Track this user
+            await this.db.collection('users').updateOne(
+                { telegram_id: ctx.from.id },
+                { 
+                    $set: { 
+                        telegram_id: ctx.from.id,
+                        username: ctx.from.username,
+                        first_name: ctx.from.first_name,
+                        last_name: ctx.from.last_name,
+                        last_active: new Date()
+                    }
+                },
+                { upsert: true }
+            );
+            
+            // Get actual user count
+            const totalUsers = await this.db.collection('users').countDocuments();
+            
+            const welcomeText = 
+                '🎯 *Welcome to Zone News Bot!*\n\n' +
+                'Adelaide\'s premier automated news distribution system\n\n' +
+                `👥 ${totalUsers} monthly users\n\n` +
+                '🚀 *Features:*\n' +
+                '• Auto-post to multiple channels\n' +
+                '• Smart content scheduling\n' +
+                '• Native Telegram reactions\n' +
+                '• Analytics & insights\n' +
+                '• Forward from any channel to add';
+            
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        { 
+                            text: '➕ Add to Channel', 
+                            url: `https://t.me/${ctx.botInfo.username}?startchannel=true` 
+                        },
+                        { 
+                            text: '➕ Add to Group', 
+                            url: `https://t.me/${ctx.botInfo.username}?startgroup=true` 
+                        }
+                    ],
+                    [
+                        { text: '📰 Latest News', callback_data: 'news' },
+                        { text: '📱 Mini App', web_app: { url: 'http://67.219.107.230/telegram-mini-app/' } }
+                    ],
+                    [
+                        { text: '📖 How to Use', callback_data: 'how_to_use' },
+                        { text: '💬 Support', url: 'https://t.me/ZoneNewsSupport' }
+                    ],
+                    ctx.isAdmin ? [{ text: '👑 Admin Panel', callback_data: 'admin' }] : []
+                ].filter(row => row.length > 0)
+            };
+            
+            await ctx.reply(welcomeText, { 
+                parse_mode: 'Markdown',
+                reply_markup: keyboard
+            });
+        });
+        
+        // /help
+        this.bot.command('help', async (ctx) => {
+            let helpText = 
+                '📚 *Zone News Bot Commands*\n\n' +
+                '*Public Commands:*\n' +
+                '/start - Welcome message\n' +
+                '/help - This help menu\n' +
+                '/news - View latest news\n' +
+                '/status - Check bot status\n' +
+                '/search - Search articles';
+            
+            if (ctx.isAdmin) {
+                helpText += '\n\n*Admin Commands:*\n' +
+                    '/post - Post to channels\n' +
+                    '/destinations - Manage destinations\n' +
+                    '/addchannel - Add channel\n' +
+                    '/addgroup - Add group\n' +
+                    '/addtopic - Add forum topic\n' +
+                    '/miniapp - Open Mini App\n' +
+                    '/setup - Bot configuration\n' +
+                    '/broadcast - Send to all';
+            }
+            
+            await ctx.reply(helpText, { parse_mode: 'Markdown' });
+        });
+        
+        // /news - Personalized news based on user interactions
+        this.bot.command('news', async (ctx) => {
+            try {
+                const userId = ctx.from.id;
+                
+                // Track user activity
+                await this.db.collection('user_activity').updateOne(
+                    { telegram_id: userId },
+                    { 
+                        $set: { 
+                            telegram_id: userId,
+                            last_active: new Date(),
+                            last_command: 'news'
+                        },
+                        $inc: { news_views: 1 }
+                    },
+                    { upsert: true }
+                );
+                
+                // Get user's interaction history for personalization
+                const userProfile = await this.db.collection('user_profiles').findOne({ telegram_id: userId });
+                const viewedArticles = userProfile?.viewed_articles || [];
+                const preferredCategories = userProfile?.preferred_categories || [];
+                
+                // Fetch articles (will be AI-personalized later)
+                let query = {};
+                if (preferredCategories.length > 0) {
+                    query.category = { $in: preferredCategories };
+                }
+                
+                const articles = await this.db.collection('news_articles')
+                    .find(query)
+                    .sort({ published_date: -1 })
+                    .limit(5)
+                    .toArray();
+                
+                if (articles.length === 0) {
+                    return ctx.reply('📰 No news articles available');
+                }
+                
+                // Send personalized header
+                const city = userProfile?.city || 'Adelaide';
+                await ctx.reply(`📰 *Top News for ${city}*\n_Personalized for you_`, { parse_mode: 'Markdown' });
+                
+                for (const article of articles) {
+                    // Track article view
+                    await this.db.collection('article_views').insertOne({
+                        user_id: userId,
+                        article_id: article._id,
+                        viewed_at: new Date(),
+                        source: 'bot_command'
+                    });
+                    
+                    // Update user profile with viewed article
+                    await this.db.collection('user_profiles').updateOne(
+                        { telegram_id: userId },
+                        { 
+                            $addToSet: { 
+                                viewed_articles: article._id,
+                                interacted_categories: article.category
+                            },
+                            $set: { last_news_view: new Date() }
+                        },
+                        { upsert: true }
+                    );
+                    
+                    const text = this.formatArticle(article);
+                    
+                    // Get reaction counts
+                    const reactions = article.reactions || {};
+                    const likes = reactions.like || 0;
+                    const loves = reactions.love || 0;
+                    const fires = reactions.fire || 0;
+                    
+                    // Check if user has reacted
+                    const userReactions = await this.db.collection('user_reactions').find({
+                        user_id: userId,
+                        article_id: article._id
+                    }).toArray();
+                    
+                    const hasLiked = userReactions.some(r => r.reaction === 'like');
+                    const hasLoved = userReactions.some(r => r.reaction === 'love');
+                    const hasFired = userReactions.some(r => r.reaction === 'fire');
+                    
+                    // Add inline buttons with personalized state
+                    const keyboard = {
+                        inline_keyboard: [
+                            [
+                                { text: `${hasLiked ? '👍' : '👍'} ${likes}`, callback_data: `react:like:${article._id}` },
+                                { text: `${hasLoved ? '❤️' : '🤍'} ${loves}`, callback_data: `react:love:${article._id}` },
+                                { text: `${hasFired ? '🔥' : '🔥'} ${fires}`, callback_data: `react:fire:${article._id}` }
+                            ],
+                            [
+                                { text: '💬 Comment', callback_data: `comment:${article._id}` },
+                                { text: '💾 Save', callback_data: `save:${article._id}` },
+                                { text: '🔗 Share', callback_data: `share:${article._id}` }
+                            ]
+                        ]
+                    };
+                    
+                    await ctx.reply(text, { 
+                        parse_mode: 'Markdown',
+                        reply_markup: keyboard
+                    });
+                }
+                
+                // Add personalized options
+                await ctx.reply('📰 *Personalized for you:*', {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '🔄 More News', callback_data: 'news:more' },
+                                { text: '🎯 For You', callback_data: 'news:personalized' }
+                            ],
+                            [
+                                { text: '📱 Open App', web_app: { url: 'http://67.219.107.230/telegram-mini-app/' } }
+                            ]
+                        ]
+                    }
+                });
+            } catch (error) {
+                console.error('Error fetching news:', error);
+                await ctx.reply('❌ Failed to fetch news');
+            }
+        });
+        
+        // /status
+        this.bot.command('status', async (ctx) => {
+            const uptime = process.uptime();
+            const hours = Math.floor(uptime / 3600);
+            const minutes = Math.floor((uptime % 3600) / 60);
+            
+            const totalArticles = await this.db.collection('news_articles').countDocuments();
+            
+            const statusText = 
+                '🤖 *Zone News Bot Status*\n\n' +
+                '✅ Bot Online\n' +
+                `⏱️ Uptime: ${hours}h ${minutes}m\n\n` +
+                `📊 Articles: ${totalArticles}\n` +
+                `👑 Admins: ${config.adminIds.length}\n\n` +
+                '💬 @ZoneNewsBot | 🌐 thezonenews.com';
+            
+            await ctx.reply(statusText, { parse_mode: 'Markdown' });
+        });
+        
+        // /app - Open Mini App
+        this.bot.command('app', async (ctx) => {
+            await ctx.reply('📱 *Zone News App*\n\nAccess the full Zone News experience', {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ 
+                            text: '🚀 Open App', 
+                            web_app: { url: 'http://67.219.107.230/telegram-mini-app/' }
+                        }],
+                        [
+                            { text: '📰 Latest News', callback_data: 'news' },
+                            { text: '⚙️ Settings', callback_data: 'settings' }
+                        ]
+                    ]
+                }
+            });
+        });
+        
+        // /upgrade - Upgrade subscription
+        this.bot.command('upgrade', async (ctx) => {
+            const upgradeText = 
+                '⭐ *Upgrade Your Plan*\n\n' +
+                'Unlock premium features and unlimited access\n\n' +
+                '📊 Current Plan: *Free*\n' +
+                '🎯 Available Upgrades:\n\n' +
+                '• *Pro* - $9.99/month\n' +
+                '• *Business* - $29.99/month\n' +
+                '• *Enterprise* - Custom pricing';
+            
+            await ctx.reply(upgradeText, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            { text: '💎 Pro', callback_data: 'upgrade:pro' },
+                            { text: '🏢 Business', callback_data: 'upgrade:business' }
+                        ],
+                        [
+                            { text: '🏭 Enterprise', callback_data: 'upgrade:enterprise' }
+                        ],
+                        [
+                            { text: '📋 View Tiers', callback_data: 'tiers' }
+                        ]
+                    ]
+                }
+            });
+        });
+        
+        // /tiers - View subscription tiers
+        this.bot.command('tiers', async (ctx) => {
+            const tiersText = 
+                '📊 *Subscription Tiers*\n\n' +
+                '🆓 *Free Tier*\n' +
+                '• 3 channels/groups\n' +
+                '• 10 posts per day\n' +
+                '• Basic analytics\n\n' +
+                '💎 *Pro Tier* ($9.99/mo)\n' +
+                '• 10 channels/groups\n' +
+                '• 100 posts per day\n' +
+                '• Advanced analytics\n' +
+                '• Priority support\n\n' +
+                '🏢 *Business Tier* ($29.99/mo)\n' +
+                '• 50 channels/groups\n' +
+                '• Unlimited posts\n' +
+                '• Full analytics suite\n' +
+                '• API access\n' +
+                '• Dedicated support\n\n' +
+                '🏭 *Enterprise Tier*\n' +
+                '• Unlimited everything\n' +
+                '• Custom integrations\n' +
+                '• SLA guarantee\n' +
+                '• Account manager';
+            
+            await ctx.reply(tiersText, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '⭐ Upgrade Now', callback_data: 'upgrade' }],
+                        [{ text: '💬 Contact Sales', url: 'https://t.me/ZoneNewsSupport' }]
+                    ]
+                }
+            });
+        });
+        
+        // /channel - Add channel
+        this.bot.command('channel', async (ctx) => {
+            await ctx.reply(
+                '📢 *Add Your Channel*\n\n' +
+                'To add your channel:\n\n' +
+                '1️⃣ Add @ZoneNewsBot as admin\n' +
+                '2️⃣ Forward any message from your channel\n' +
+                '3️⃣ Or send the channel username\n\n' +
+                'Example: @YourChannelName',
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ 
+                                text: '➕ Add Bot to Channel', 
+                                url: `https://t.me/${ctx.botInfo.username}?startchannel=true` 
+                            }],
+                            [{ text: '📖 Help', callback_data: 'help:channel' }]
+                        ]
+                    }
+                }
+            );
+        });
+        
+        // /group - Add group
+        this.bot.command('group', async (ctx) => {
+            await ctx.reply(
+                '👥 *Add Your Group*\n\n' +
+                'To add your group:\n\n' +
+                '1️⃣ Add @ZoneNewsBot to your group\n' +
+                '2️⃣ Make the bot admin\n' +
+                '3️⃣ Use /setup in the group\n\n' +
+                'Or forward a message from your group here',
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ 
+                                text: '➕ Add Bot to Group', 
+                                url: `https://t.me/${ctx.botInfo.username}?startgroup=true` 
+                            }],
+                            [{ text: '📖 Help', callback_data: 'help:group' }]
+                        ]
+                    }
+                }
+            );
+        });
+        
+        // /settings - User settings
+        this.bot.command('settings', async (ctx) => {
+            // Get user preferences
+            const user = await this.db.collection('users').findOne({ telegram_id: ctx.from.id });
+            const city = user?.city || 'Adelaide';
+            const notifications = user?.notifications !== false;
+            
+            await ctx.reply(
+                '⚙️ *Settings*\n\n' +
+                `📍 City: *${city}*\n` +
+                `🔔 Notifications: *${notifications ? 'On' : 'Off'}*\n` +
+                `🌐 Language: *English*\n` +
+                `🎨 Theme: *Auto*`,
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '📍 Change City', callback_data: 'settings:city' },
+                                { text: '🔔 Notifications', callback_data: 'settings:notifications' }
+                            ],
+                            [
+                                { text: '🌐 Language', callback_data: 'settings:language' },
+                                { text: '🎨 Theme', callback_data: 'settings:theme' }
+                            ],
+                            [
+                                { text: '👤 Profile', callback_data: 'settings:profile' },
+                                { text: '🗑️ Clear Data', callback_data: 'settings:clear' }
+                            ]
+                        ]
+                    }
+                }
+            );
+        });
+        
+        // /search - Search articles
+        this.bot.command('search', async (ctx) => {
+            const searchTerm = ctx.message.text.split(' ').slice(1).join(' ');
+            
+            if (!searchTerm) {
+                return ctx.reply(
+                    '🔍 *Search Articles*\n\n' +
+                    'Usage: /search [keyword]\n\n' +
+                    'Example: /search adelaide news',
+                    { parse_mode: 'Markdown' }
+                );
+            }
+            
+            try {
+                // Search in title and content
+                const articles = await this.db.collection('news_articles')
+                    .find({
+                        $or: [
+                            { title: { $regex: searchTerm, $options: 'i' } },
+                            { content: { $regex: searchTerm, $options: 'i' } },
+                            { summary: { $regex: searchTerm, $options: 'i' } }
+                        ]
+                    })
+                    .sort({ published_date: -1 })
+                    .limit(10)
+                    .toArray();
+                
+                if (articles.length === 0) {
+                    return ctx.reply(`🔍 No articles found for "${searchTerm}"`);
+                }
+                
+                await ctx.reply(
+                    `🔍 *Search Results for "${searchTerm}"*\n` +
+                    `Found ${articles.length} article(s)\n`,
+                    { parse_mode: 'Markdown' }
+                );
+                
+                for (const article of articles.slice(0, 5)) {
+                    const text = this.formatArticle(article);
+                    const reactions = article.reactions || {};
+                    
+                    await ctx.reply(text, {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: `👍 ${reactions.like || 0}`, callback_data: `react:like:${article._id}` },
+                                    { text: `❤️ ${reactions.love || 0}`, callback_data: `react:love:${article._id}` },
+                                    { text: `🔥 ${reactions.fire || 0}`, callback_data: `react:fire:${article._id}` }
+                                ],
+                                [
+                                    { text: '💾 Save', callback_data: `save:${article._id}` },
+                                    { text: '🔗 Share', callback_data: `share:${article._id}` }
+                                ]
+                            ]
+                        }
+                    });
+                }
+                
+                if (articles.length > 5) {
+                    await ctx.reply(
+                        `\n📚 Showing 5 of ${articles.length} results\n` +
+                        'Use the mini app for full search',
+                        {
+                            reply_markup: {
+                                inline_keyboard: [[
+                                    { text: '📱 Open Full Search', web_app: { url: 'http://67.219.107.230/telegram-mini-app/' } }
+                                ]]
+                            }
+                        }
+                    );
+                }
+            } catch (error) {
+                console.error('Search error:', error);
+                await ctx.reply('❌ Search failed. Please try again.');
+            }
+        });
+        
+        // /miniapp - Open mini app
+        this.bot.command('miniapp', async (ctx) => {
+            await ctx.reply(
+                '📱 *Zone News Mini App*\n\n' +
+                'Access the full Zone News experience with advanced features',
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [[
+                            { text: '🚀 Open Mini App', web_app: { url: 'http://67.219.107.230/telegram-mini-app/' } }
+                        ]]
+                    }
+                }
+            );
+        });
+        
+        // /setup - Initial bot setup
+        this.bot.command('setup', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            await ctx.reply(
+                '🛠️ *Bot Setup Wizard*\n\n' +
+                'Let\'s configure your Zone News Bot:\n\n' +
+                '1️⃣ Add channels/groups\n' +
+                '2️⃣ Configure posting schedule\n' +
+                '3️⃣ Set your preferences\n' +
+                '4️⃣ Enable features\n\n' +
+                'Select an option to begin:',
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '📢 Add Channel', callback_data: 'setup:channel' }],
+                            [{ text: '👥 Add Group', callback_data: 'setup:group' }],
+                            [{ text: '⏰ Set Schedule', callback_data: 'setup:schedule' }],
+                            [{ text: '⚙️ Preferences', callback_data: 'setup:preferences' }],
+                            [{ text: '✅ Complete Setup', callback_data: 'setup:complete' }]
+                        ]
+                    }
+                }
+            );
+        });
+        
+        // /discover - Discover trending content
+        this.bot.command('discover', async (ctx) => {
+            try {
+                // Get trending articles based on views and reactions
+                const articles = await this.db.collection('news_articles')
+                    .aggregate([
+                        {
+                            $addFields: {
+                                engagement_score: {
+                                    $add: [
+                                        { $ifNull: ['$views', 0] },
+                                        { $multiply: [{ $ifNull: ['$reactions.like', 0] }, 2] },
+                                        { $multiply: [{ $ifNull: ['$reactions.love', 0] }, 3] },
+                                        { $multiply: [{ $ifNull: ['$reactions.fire', 0] }, 4] }
+                                    ]
+                                }
+                            }
+                        },
+                        { $sort: { engagement_score: -1, published_date: -1 } },
+                        { $limit: 10 }
+                    ])
+                    .toArray();
+                
+                if (articles.length === 0) {
+                    return ctx.reply('📰 No trending articles available');
+                }
+                
+                await ctx.reply(
+                    '🔥 *Trending on Zone News*\n\n' +
+                    'Most engaging content right now:',
+                    { parse_mode: 'Markdown' }
+                );
+                
+                for (const article of articles.slice(0, 5)) {
+                    const text = this.formatArticle(article);
+                    const reactions = article.reactions || {};
+                    
+                    await ctx.reply(text, {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: `👍 ${reactions.like || 0}`, callback_data: `react:like:${article._id}` },
+                                    { text: `❤️ ${reactions.love || 0}`, callback_data: `react:love:${article._id}` },
+                                    { text: `🔥 ${reactions.fire || 0}`, callback_data: `react:fire:${article._id}` }
+                                ],
+                                [
+                                    { text: '💬 Comment', callback_data: `comment:${article._id}` },
+                                    { text: '🔗 Share', callback_data: `share:${article._id}` }
+                                ]
+                            ]
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error('Discover error:', error);
+                await ctx.reply('❌ Failed to load trending content');
+            }
+        });
+        
+        // /settings
+        this.bot.command('settings', async (ctx) => {
+            const settings = await this.getUserSettings(ctx.from.id);
+            
+            const text = 
+                '⚙️ *Settings*\n\n' +
+                `🔔 Notifications: ${settings?.notifications ? 'On' : 'Off'}\n` +
+                `🌐 Language: ${settings?.language || 'English'}\n` +
+                `📰 Categories: ${settings?.categories?.join(', ') || 'All'}\n\n` +
+                'Select an option to change:';
+            
+            const keyboard = {
+                inline_keyboard: [
+                    [{ text: settings?.notifications ? '🔕 Disable Notifications' : '🔔 Enable Notifications', 
+                       callback_data: 'toggle_notifications' }],
+                    [{ text: '📂 Select Categories', callback_data: 'select_categories' }],
+                    [{ text: '❌ Close', callback_data: 'close' }]
+                ]
+            };
+            
+            await ctx.reply(text, {
+                parse_mode: 'Markdown',
+                reply_markup: keyboard
+            });
+        });
+        
+        // /cancel
+        this.bot.command('cancel', async (ctx) => {
+            // Clear any active state
+            if (this.bot.context?.botService) {
+                this.bot.context.botService.clearState(ctx.from.id);
+            }
+            
+            await ctx.reply('❌ Operation cancelled', {
+                reply_markup: { remove_keyboard: true }
+            });
+        });
+    }
+    
+    registerAdminCommands() {
+        // /admin
+        this.bot.command('admin', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            await this.showAdminPanel(ctx);
+        });
+        
+        // /post
+        this.bot.command('post', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            const destinations = await this.getDestinations();
+            
+            if (destinations.length === 0) {
+                return ctx.reply('No destinations configured. Use /addchannel first.');
+            }
+            
+            // Check for advanced posting options
+            const args = ctx.message.text.split(' ').slice(1);
+            
+            if (args[0] === 'linked') {
+                // Linked posting mode
+                await ctx.reply(
+                    '🔗 *Linked Posting Mode*\n\n' +
+                    'Post to a channel and auto-forward to groups with discussion link.\n\n' +
+                    'Select primary channel:',
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: destinations
+                                .filter(d => d.type === 'channel')
+                                .map(dest => [{
+                                    text: `📢 ${dest.name || dest.id}`,
+                                    callback_data: `linked_post:${dest._id}`
+                                }])
+                        }
+                    }
+                );
+            } else {
+                // Regular posting
+                await ctx.reply('Select posting mode:', {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '📤 Single Destination', callback_data: 'post_single' }],
+                            [{ text: '🔗 Linked Post (Channel + Groups)', callback_data: 'post_linked' }],
+                            [{ text: '📢 Broadcast to All', callback_data: 'post_broadcast' }],
+                            [{ text: '❌ Cancel', callback_data: 'close' }]
+                        ]
+                    }
+                });
+            }
+        });
+        
+        // /destinations
+        this.bot.command('destinations', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            const destinations = await this.getDestinations();
+            
+            if (destinations.length === 0) {
+                return ctx.reply('No destinations configured');
+            }
+            
+            const list = destinations.map((dest, i) => 
+                `${i + 1}. ${dest.type === 'channel' ? '📢' : '👥'} ${dest.name || dest.id}`
+            ).join('\n');
+            
+            await ctx.reply(`📋 *Destinations:*\n\n${list}`, { parse_mode: 'Markdown' });
+        });
+        
+        // /addchannel
+        this.bot.command('addchannel', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            const args = ctx.message.text.split(' ').slice(1);
+            
+            if (args.length === 0) {
+                return ctx.reply(
+                    '📢 *Add Channel*\n\n' +
+                    'Usage:\n' +
+                    '• `/addchannel @channelname`\n' +
+                    '• `/addchannel -1001234567890` (chat ID)\n\n' +
+                    'Examples:\n' +
+                    '• `/addchannel @ZoneNewsAdl`\n' +
+                    '• `/addchannel -1072796395391`\n\n' +
+                    '💡 Bot must be admin in the channel!',
+                    { parse_mode: 'Markdown' }
+                );
+            }
+            
+            let channelInput = args[0];
+            
+            // Check if it's a chat ID (negative number)
+            const isChatId = /^-?\d+$/.test(channelInput);
+            
+            // Normalize channel input (ensure @ for usernames)
+            if (!isChatId && !channelInput.startsWith('@')) {
+                channelInput = '@' + channelInput;
+            }
+            
+            // Block protected channels
+            const PROTECTED_CHANNELS = ['@ZoneNewsAdl', '@ZoneNewsAdelaideA', '@ZoneNewsAdelaide'];
+            const OWNER_ID = 7802629063; // Duke Exxotic
+            
+            if (PROTECTED_CHANNELS.includes(channelInput.toLowerCase()) && ctx.from.id !== OWNER_ID) {
+                return ctx.reply(
+                    '🔒 *Protected Channel*\n\n' +
+                    'Sorry, this channel is not available to be posted in.\n\n' +
+                    'Only the group owner can approve posting to this channel.',
+                    { parse_mode: 'Markdown' }
+                );
+            }
+            
+            // Send processing message
+            const processingMsg = await ctx.reply('🔄 Checking channel...');
+            
+            try {
+                // Check if already exists by both username and ID
+                const existing = await this.db.collection('destinations').findOne({
+                    $or: [
+                        { username: channelInput },
+                        { id: channelInput }
+                    ]
+                });
+                
+                if (existing) {
+                    await ctx.telegram.editMessageText(
+                        ctx.chat.id,
+                        processingMsg.message_id,
+                        null,
+                        `⚠️ *Channel Already Added*\n\n` +
+                        `📢 Channel: ${existing.name || existing.username || existing.id}\n` +
+                        `✅ Status: Active\n` +
+                        `📅 Added: ${new Date(existing.added_at).toLocaleDateString('en-AU')}\n\n` +
+                        `Use /destinations to see all channels`,
+                        { parse_mode: 'Markdown' }
+                    );
+                    return;
+                }
+                
+                // Try to verify the channel exists and bot has access
+                let channelInfo = null;
+                let channelId = channelInput;
+                let botStatus = null;
+                let linkedChatId = null;
+                
+                try {
+                    // Try to get chat info
+                    const chat = await ctx.telegram.getChat(channelInput);
+                    channelInfo = {
+                        id: chat.id.toString(),
+                        username: chat.username ? '@' + chat.username : null,
+                        title: chat.title,
+                        type: chat.type,
+                        description: chat.description,
+                        linked_chat_id: chat.linked_chat_id
+                    };
+                    channelId = chat.id.toString();
+                    linkedChatId = chat.linked_chat_id;
+                    
+                    // Try to get bot member status
+                    try {
+                        const member = await ctx.telegram.getChatMember(chat.id, ctx.botInfo.id);
+                        botStatus = member.status;
+                    } catch (e) {
+                        botStatus = 'not_member';
+                    }
+                } catch (error) {
+                    console.log('Could not verify channel:', error.message);
+                    
+                    // Check if it's a "chat not found" error
+                    if (error.description?.includes('chat not found')) {
+                        await ctx.telegram.editMessageText(
+                            ctx.chat.id,
+                            processingMsg.message_id,
+                            null,
+                            `❌ *Channel Not Found*\n\n` +
+                            `Could not find channel: ${channelInput}\n\n` +
+                            `Please check:\n` +
+                            `1. Channel username is correct\n` +
+                            `2. Channel is public or bot is member\n` +
+                            `3. Use format: @channelname`,
+                            { parse_mode: 'Markdown' }
+                        );
+                        return;
+                    }
+                }
+                
+                // Add to database
+                await this.db.collection('destinations').insertOne({
+                    id: channelId,
+                    username: channelInfo?.username || (isChatId ? null : channelInput),
+                    type: 'channel',
+                    name: channelInfo?.title || channelInput,
+                    description: channelInfo?.description,
+                    verified: !!channelInfo,
+                    bot_status: botStatus,
+                    linked_chat_id: linkedChatId,
+                    added_at: new Date(),
+                    added_by: ctx.from.id
+                });
+                
+                // If there's a linked discussion group, add it too
+                if (linkedChatId) {
+                    try {
+                        const linkedChat = await ctx.telegram.getChat(linkedChatId);
+                        
+                        // Check if group already exists
+                        const existingGroup = await this.db.collection('destinations').findOne({
+                            id: linkedChatId.toString()
+                        });
+                        
+                        if (!existingGroup) {
+                            await this.db.collection('destinations').insertOne({
+                                id: linkedChatId.toString(),
+                                type: 'group',
+                                name: linkedChat.title,
+                                linked_to_channel: channelId,
+                                verified: true,
+                                added_at: new Date(),
+                                added_by: ctx.from.id,
+                                auto_added: true
+                            });
+                        }
+                    } catch (err) {
+                        console.log('Could not add linked discussion group:', err.message);
+                    }
+                }
+                
+                // Prepare success message based on bot status
+                let statusEmoji = '✅';
+                let statusText = 'Ready';
+                let instructions = '';
+                
+                if (botStatus === 'administrator') {
+                    statusEmoji = '✅';
+                    statusText = 'Bot is admin - Ready to post!';
+                } else if (botStatus === 'member') {
+                    statusEmoji = '⚠️';
+                    statusText = 'Bot is member but not admin';
+                    instructions = '\n\n*Action Required:*\nPromote bot to admin with "Post Messages" permission';
+                } else if (botStatus === 'not_member' || !botStatus) {
+                    statusEmoji = '⚠️';
+                    statusText = 'Bot not in channel';
+                    instructions = '\n\n*Action Required:*\n1. Add @ZoneNewsBot to channel\n2. Make bot admin\n3. Grant "Post Messages" permission';
+                }
+                
+                // Send detailed success message
+                let successMessage = 
+                    `${statusEmoji} *Channel Added Successfully!*\n\n` +
+                    `📢 *Channel Details:*\n` +
+                    `• Name: ${channelInfo?.title || channelInput}\n` +
+                    `• Username: ${channelInfo?.username || 'ID: ' + channelId}\n` +
+                    `• ID: \`${channelId}\`\n` +
+                    `• Type: ${channelInfo?.type || 'channel'}\n`;
+                
+                if (linkedChatId) {
+                    successMessage += `• 💬 Linked Group: Added automatically\n`;
+                }
+                
+                successMessage += 
+                    `\n🤖 *Bot Status:* ${statusText}` +
+                    instructions +
+                    `\n\n📝 Use /post to send news to this channel`;
+                
+                await ctx.telegram.editMessageText(
+                    ctx.chat.id,
+                    processingMsg.message_id,
+                    null,
+                    successMessage,
+                    { parse_mode: 'Markdown' }
+                );
+                
+                // Test post if bot is admin
+                if (botStatus === 'administrator') {
+                    try {
+                        const testMsg = await ctx.telegram.sendMessage(
+                            channelId,
+                            '✅ Zone News Bot connected successfully!\n\nThis is a test message to confirm the bot can post to this channel.',
+                            { disable_notification: true }
+                        );
+                        
+                        // Delete test message after 5 seconds
+                        setTimeout(() => {
+                            ctx.telegram.deleteMessage(channelId, testMsg.message_id).catch(() => {});
+                        }, 5000);
+                        
+                        await ctx.reply('✅ Test message sent and will be deleted in 5 seconds');
+                    } catch (error) {
+                        console.log('Could not send test message:', error.message);
+                    }
+                }
+            } catch (error) {
+                console.error('Error adding channel:', error);
+                await ctx.telegram.editMessageText(
+                    ctx.chat.id,
+                    processingMsg.message_id,
+                    null,
+                    `❌ *Failed to Add Channel*\n\n` +
+                    `Error: ${error.message || 'Unknown error'}\n\n` +
+                    `Please try again or contact support`,
+                    { parse_mode: 'Markdown' }
+                );
+            }
+        });
+        
+        // /editpost - Edit recent posts (Telegram allows editing messages up to 48 hours old)
+        this.bot.command('editpost', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            // Get posts from last 48 hours (Telegram's edit limit)
+            const twoDaysAgo = new Date();
+            twoDaysAgo.setHours(twoDaysAgo.getHours() - 48);
+            
+            const recentPosts = await this.db.collection('posted_articles')
+                .find({ 
+                    posted_at: { $gte: twoDaysAgo },
+                    posted_by: ctx.from.id
+                })
+                .sort({ posted_at: -1 })
+                .limit(10)
+                .toArray();
+            
+            if (recentPosts.length === 0) {
+                return ctx.reply(
+                    '📝 *No Editable Posts*\n\n' +
+                    'No posts found in the last 48 hours.\n\n' +
+                    '_Note: Telegram only allows editing messages up to 48 hours old._',
+                    { parse_mode: 'Markdown' }
+                );
+            }
+            
+            await ctx.reply(
+                '📝 *Edit Recent Posts*\n\n' +
+                'Select a post to edit (last 48 hours only):',
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: recentPosts.map(post => [{
+                            text: `📰 ${post.title || 'Post'} - ${new Date(post.posted_at).toLocaleString('en-AU')}`,
+                            callback_data: `edit_post:${post._id}`
+                        }])
+                    }
+                }
+            );
+        });
+        
+        // /analytics - View analytics
+        this.bot.command('analytics', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            // Get analytics data
+            const [totalUsers, activeUsers, totalPosts, totalViews, topCategories] = await Promise.all([
+                this.db.collection('users').countDocuments(),
+                this.db.collection('user_activity').countDocuments({
+                    last_active: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
+                }),
+                this.db.collection('posted_articles').countDocuments(),
+                this.db.collection('article_views').countDocuments(),
+                this.db.collection('user_profiles').aggregate([
+                    { $unwind: '$interacted_categories' },
+                    { $group: { _id: '$interacted_categories', count: { $sum: 1 } } },
+                    { $sort: { count: -1 } },
+                    { $limit: 5 }
+                ]).toArray()
+            ]);
+            
+            const analyticsText = 
+                '📊 *Analytics Dashboard*\n\n' +
+                '*User Metrics:*\n' +
+                `👥 Total Users: ${totalUsers}\n` +
+                `🟢 Active (30d): ${activeUsers}\n\n` +
+                '*Content Metrics:*\n' +
+                `📰 Total Posts: ${totalPosts}\n` +
+                `👁 Total Views: ${totalViews}\n\n` +
+                '*Top Categories:*\n' +
+                topCategories.map((cat, i) => `${i + 1}. ${cat._id}: ${cat.count} interactions`).join('\n');
+            
+            await ctx.reply(analyticsText, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            { text: '📈 Detailed Stats', callback_data: 'analytics:detailed' },
+                            { text: '📅 Weekly Report', callback_data: 'analytics:weekly' }
+                        ],
+                        [
+                            { text: '💰 Revenue', callback_data: 'analytics:revenue' },
+                            { text: '📊 Export CSV', callback_data: 'analytics:export' }
+                        ]
+                    ]
+                }
+            });
+        });
+        
+        // /schedule - Schedule posts
+        this.bot.command('schedule', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            // Get scheduled posts
+            const scheduledPosts = await this.db.collection('scheduled_posts')
+                .find({ 
+                    scheduled_for: { $gte: new Date() },
+                    status: 'pending'
+                })
+                .sort({ scheduled_for: 1 })
+                .limit(10)
+                .toArray();
+            
+            let scheduleText = '📅 *Scheduled Posts*\n\n';
+            
+            if (scheduledPosts.length > 0) {
+                scheduleText += '*Upcoming Posts:*\n';
+                scheduledPosts.forEach((post, i) => {
+                    const time = new Date(post.scheduled_for).toLocaleString('en-AU');
+                    scheduleText += `${i + 1}. ${post.title} - ${time}\n`;
+                });
+                scheduleText += '\n';
+            } else {
+                scheduleText += '_No scheduled posts_\n\n';
+            }
+            
+            scheduleText += 'Select an action:';
+            
+            await ctx.reply(scheduleText, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            { text: '➕ Schedule New', callback_data: 'schedule:new' },
+                            { text: '📋 View All', callback_data: 'schedule:view' }
+                        ],
+                        [
+                            { text: '⏰ Set Auto-Post', callback_data: 'schedule:auto' },
+                            { text: '🗑️ Clear Queue', callback_data: 'schedule:clear' }
+                        ]
+                    ]
+                }
+            });
+        });
+        
+        // /destinations - Manage destinations
+        this.bot.command('destinations', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            const destinations = await this.db.collection('destinations').find({}).toArray();
+            
+            if (destinations.length === 0) {
+                return ctx.reply(
+                    '📍 *No Destinations*\n\n' +
+                    'You haven\'t added any channels or groups yet.\n\n' +
+                    'Use:\n' +
+                    '• /channel - Add a channel\n' +
+                    '• /group - Add a group',
+                    { parse_mode: 'Markdown' }
+                );
+            }
+            
+            // Group by type
+            const channels = destinations.filter(d => d.type === 'channel');
+            const groups = destinations.filter(d => d.type === 'group');
+            const forums = destinations.filter(d => d.type === 'forum');
+            
+            let destText = '📍 *Your Destinations*\n\n';
+            
+            if (channels.length > 0) {
+                destText += '*📢 Channels:*\n';
+                channels.forEach(ch => {
+                    const status = ch.bot_status === 'administrator' ? '✅' : '⚠️';
+                    destText += `${status} ${ch.name || ch.username || ch.id}\n`;
+                });
+                destText += '\n';
+            }
+            
+            if (groups.length > 0) {
+                destText += '*👥 Groups:*\n';
+                groups.forEach(gr => {
+                    const status = gr.bot_status === 'administrator' ? '✅' : '⚠️';
+                    destText += `${status} ${gr.name || gr.id}\n`;
+                });
+                destText += '\n';
+            }
+            
+            if (forums.length > 0) {
+                destText += '*💬 Forum Topics:*\n';
+                forums.forEach(f => {
+                    destText += `• ${f.name} (Topic ${f.topic_id})\n`;
+                });
+            }
+            
+            await ctx.reply(destText, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            { text: '➕ Add Channel', callback_data: 'add:channel' },
+                            { text: '➕ Add Group', callback_data: 'add:group' }
+                        ],
+                        [
+                            { text: '🗑️ Remove', callback_data: 'destinations:remove' },
+                            { text: '🔄 Refresh', callback_data: 'destinations:refresh' }
+                        ]
+                    ]
+                }
+            });
+        });
+        
+        // /addgroup
+        this.bot.command('addgroup', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            const args = ctx.message.text.split(' ').slice(1);
+            
+            // If argument provided, add by ID
+            if (args.length > 0) {
+                const groupId = args[0];
+                
+                // Check if it's a valid group ID (negative number)
+                if (!/^-\d+$/.test(groupId)) {
+                    return ctx.reply(
+                        '❌ Invalid group ID\n\n' +
+                        'Usage:\n' +
+                        '• `/addgroup -1001234567890`\n' +
+                        '• Use /addgroup in a group without ID'
+                    );
+                }
+                
+                try {
+                    const chat = await ctx.telegram.getChat(groupId);
+                    
+                    // Check if already exists
+                    const existing = await this.db.collection('destinations').findOne({
+                        id: chat.id.toString()
+                    });
+                    
+                    if (existing) {
+                        return ctx.reply(`⚠️ Group "${chat.title}" is already added`);
+                    }
+                    
+                    // Add to database
+                    await this.db.collection('destinations').insertOne({
+                        id: chat.id.toString(),
+                        type: chat.is_forum ? 'forum' : 'group',
+                        name: chat.title,
+                        description: chat.description,
+                        is_forum: chat.is_forum,
+                        verified: true,
+                        added_at: new Date(),
+                        added_by: ctx.from.id
+                    });
+                    
+                    await ctx.reply(
+                        `✅ *Group Added Successfully!*\n\n` +
+                        `👥 Name: ${chat.title}\n` +
+                        `🆔 ID: \`${chat.id}\`\n` +
+                        `📝 Type: ${chat.is_forum ? 'Forum' : 'Group'}`,
+                        { parse_mode: 'Markdown' }
+                    );
+                } catch (error) {
+                    await ctx.reply(
+                        `❌ Failed to add group\n\n` +
+                        `Make sure:\n` +
+                        `1. The ID is correct\n` +
+                        `2. Bot is a member of the group`
+                    );
+                }
+                return;
+            }
+            
+            // Original behavior - add current group
+            if (ctx.chat.type === 'private') {
+                return ctx.reply(
+                    '👥 *Add Group*\n\n' +
+                    'Usage:\n' +
+                    '• `/addgroup` (use in a group)\n' +
+                    '• `/addgroup -1001234567890` (by ID)\n\n' +
+                    'Examples:\n' +
+                    '• `/addgroup -1072796395391`',
+                    { parse_mode: 'Markdown' }
+                );
+            }
+            
+            const destData = {
+                id: ctx.chat.id.toString(),
+                type: ctx.chat.is_forum ? 'forum' : 'group',
+                name: ctx.chat.title,
+                added_at: new Date()
+            };
+            
+            // For forums, store the general topic ID (1)
+            if (ctx.chat.is_forum) {
+                destData.is_forum = true;
+                destData.default_thread_id = 1; // General topic
+            }
+            
+            await this.db.collection('destinations').insertOne(destData);
+            
+            await ctx.reply(`✅ ${ctx.chat.is_forum ? 'Forum' : 'Group'} added`);
+        });
+        
+        // /addtopic
+        this.bot.command('addtopic', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            // Check if in a forum
+            if (!ctx.chat?.is_forum) {
+                return ctx.reply('This command can only be used in forum groups');
+            }
+            
+            const topicId = ctx.message?.message_thread_id;
+            
+            if (!topicId) {
+                return ctx.reply('Please use this command inside a forum topic');
+            }
+            
+            try {
+                // Get or create forum destination
+                let forum = await this.db.collection('destinations').findOne({
+                    id: ctx.chat.id.toString(),
+                    type: 'forum'
+                });
+                
+                if (!forum) {
+                    // Create forum entry first
+                    await this.db.collection('destinations').insertOne({
+                        id: ctx.chat.id.toString(),
+                        type: 'forum',
+                        name: ctx.chat.title,
+                        is_forum: true,
+                        topics: [{
+                            id: topicId,
+                            name: `Topic ${topicId}`,
+                            added_at: new Date()
+                        }],
+                        added_at: new Date(),
+                        added_by: ctx.from.id
+                    });
+                    
+                    await ctx.reply(`✅ Forum and topic added successfully!`);
+                } else {
+                    // Add topic to existing forum
+                    const topics = forum.topics || [];
+                    
+                    if (topics.find(t => t.id === topicId)) {
+                        return ctx.reply('⚠️ This topic is already added');
+                    }
+                    
+                    await this.db.collection('destinations').updateOne(
+                        { _id: forum._id },
+                        { 
+                            $push: { 
+                                topics: {
+                                    id: topicId,
+                                    name: `Topic ${topicId}`,
+                                    added_at: new Date()
+                                }
+                            }
+                        }
+                    );
+                    
+                    await ctx.reply(`✅ Topic added to ${ctx.chat.title}`);
+                }
+            } catch (error) {
+                console.error('Error adding topic:', error);
+                await ctx.reply('❌ Failed to add topic');
+            }
+        });
+        
+        // /removedestination
+        this.bot.command('removedestination', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            const destinations = await this.getDestinations();
+            
+            if (destinations.length === 0) {
+                return ctx.reply('No destinations to remove');
+            }
+            
+            const keyboard = {
+                inline_keyboard: destinations.map(dest => [{
+                    text: `🗑️ ${dest.name || dest.id}`,
+                    callback_data: `remove_dest:${dest._id}`
+                }])
+            };
+            
+            keyboard.inline_keyboard.push([{ text: '❌ Cancel', callback_data: 'close' }]);
+            
+            await ctx.reply('Select destination to remove:', {
+                reply_markup: keyboard
+            });
+        });
+        
+        // /setup
+        this.bot.command('setup', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            const keyboard = {
+                inline_keyboard: [
+                    [{ text: '📢 Add Channels', callback_data: 'setup_channels' }],
+                    [{ text: '👥 Manage Admins', callback_data: 'setup_admins' }],
+                    [{ text: '⏰ Configure Schedules', callback_data: 'setup_schedules' }],
+                    [{ text: '🔍 Discover Channels', callback_data: 'setup_discover' }],
+                    [{ text: '❌ Exit Setup', callback_data: 'close' }]
+                ]
+            };
+            
+            await ctx.reply(
+                '🚀 *Zone News Bot Setup*\n\n' +
+                'Configure your bot settings:\n\n' +
+                'What would you like to set up?',
+                { 
+                    parse_mode: 'Markdown', 
+                    reply_markup: keyboard 
+                }
+            );
+        });
+        
+        // /discover
+        this.bot.command('discover', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            await ctx.reply(
+                '🔍 *Discovering Channels & Groups*\n\n' +
+                'Scanning for places where bot is admin...',
+                { parse_mode: 'Markdown' }
+            );
+            
+            // This would need actual implementation to discover channels
+            await ctx.reply(
+                '❌ Auto-discovery requires additional permissions.\n\n' +
+                'Please add channels manually using:\n' +
+                '• /addchannel @channel\n' +
+                '• /addgroup (in group)'
+            );
+        });
+        
+        // /schedule
+        this.bot.command('schedule', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            const parts = ctx.message.text.split(' ');
+            
+            if (parts.length < 3) {
+                return ctx.reply(
+                    '⏰ *Schedule Post*\n\n' +
+                    'Usage: /schedule [time] [destination]\n\n' +
+                    '*Time Formats:*\n' +
+                    '• `14:30` - Today at 2:30 PM\n' +
+                    '• `tomorrow 09:00` - Tomorrow at 9 AM\n' +
+                    '• `daily 10:00` - Every day at 10 AM\n\n' +
+                    'Example: /schedule daily 09:00 @ZoneNewsAdl',
+                    { parse_mode: 'Markdown' }
+                );
+            }
+            
+            // Store schedule in database
+            await this.db.collection('scheduled_posts').insertOne({
+                user_id: ctx.from.id,
+                schedule: parts[1],
+                destination: parts[2],
+                created_at: new Date(),
+                active: true
+            });
+            
+            await ctx.reply('✅ Schedule created successfully');
+        });
+        
+        // /addtopic
+        this.bot.command('addtopic', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            const args = ctx.message.text.split(' ').slice(1);
+            
+            if (args.length < 2) {
+                return ctx.reply(
+                    '📍 *Add Forum Topic*\n\n' +
+                    'Usage: /addtopic [forum_id] [topic_id]\n\n' +
+                    'Example: /addtopic -1001234567890 123\n\n' +
+                    'To find topic ID:\n' +
+                    '1. Right-click topic in forum\n' +
+                    '2. Copy link\n' +
+                    '3. The number after last / is topic ID',
+                    { parse_mode: 'Markdown' }
+                );
+            }
+            
+            const [forumId, topicId] = args;
+            
+            await this.db.collection('forum_topics').insertOne({
+                forum_id: forumId,
+                topic_id: parseInt(topicId),
+                name: `Topic ${topicId}`,
+                added_at: new Date(),
+                added_by: ctx.from.id
+            });
+            
+            await ctx.reply(`✅ Topic ${topicId} added to forum ${forumId}`);
+        });
+        
+        // /listtopics
+        this.bot.command('listtopics', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            const topics = await this.db.collection('forum_topics').find({}).toArray();
+            
+            if (topics.length === 0) {
+                return ctx.reply('No forum topics configured');
+            }
+            
+            const list = topics.map((topic, i) => 
+                `${i + 1}. Forum: ${topic.forum_id}\n   └─ Topic: ${topic.topic_id} (${topic.name})`
+            ).join('\n\n');
+            
+            await ctx.reply(`📋 *Forum Topics:*\n\n${list}`, { parse_mode: 'Markdown' });
+        });
+        
+        // /posttotopic
+        this.bot.command('posttotopic', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            const args = ctx.message.text.split(' ').slice(1);
+            
+            if (args.length < 3) {
+                return ctx.reply(
+                    '📮 *Post to Forum Topic*\n\n' +
+                    'Usage: /posttotopic [forum_id] [topic_id] [message]\n\n' +
+                    'Example: /posttotopic -1001234567890 123 Hello topic!',
+                    { parse_mode: 'Markdown' }
+                );
+            }
+            
+            const [forumId, topicId, ...messageParts] = args;
+            const message = messageParts.join(' ');
+            
+            try {
+                await this.bot.telegram.sendMessage(forumId, message, {
+                    message_thread_id: parseInt(topicId),
+                    parse_mode: 'Markdown'
+                });
+                
+                await ctx.reply('✅ Message sent to topic');
+            } catch (err) {
+                await ctx.reply(`❌ Failed: ${err.message}`);
+            }
+        });
+        
+        // /broadcast - Safe broadcast with confirmation
+        this.bot.command('broadcast', async (ctx) => {
+            if (!ctx.isAdmin) {
+                return ctx.reply('⚠️ Admin access required');
+            }
+            
+            const message = ctx.message.text.split(' ').slice(1).join(' ');
+            
+            if (!message) {
+                return ctx.reply(
+                    '📢 *Broadcast Message*\n\n' +
+                    'Usage: /broadcast [message]\n\n' +
+                    'Safety features:\n' +
+                    '• Requires confirmation\n' +
+                    '• Batch processing\n' +
+                    '• Rate limited',
+                    { parse_mode: 'Markdown' }
+                );
+            }
+            
+            // Get all users for broadcast
+            const users = await this.db.collection('users')
+                .find({})
+                .toArray();
+            
+            const userCount = users.length;
+            
+            if (userCount === 0) {
+                return ctx.reply('📢 No users to broadcast to');
+            }
+            
+            // Store broadcast for confirmation
+            const broadcastId = `broadcast_${Date.now()}`;
+            await this.db.collection('pending_broadcasts').insertOne({
+                id: broadcastId,
+                admin_id: ctx.from.id,
+                message: message,
+                user_count: userCount,
+                created_at: new Date(),
+                status: 'pending'
+            });
+            
+            await ctx.reply(
+                `📢 *Broadcast Confirmation Required*\n\n` +
+                `Recipients: ${userCount} users\n` +
+                `Message preview:\n\n${message.substring(0, 300)}${message.length > 300 ? '...' : ''}\n\n` +
+                `⚠️ This action cannot be undone.`,
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: `✅ Send to ${userCount} users`, callback_data: `broadcast_confirm:${broadcastId}` },
+                                { text: '❌ Cancel', callback_data: 'broadcast_cancel' }
+                            ]
+                        ]
+                    }
+                }
+        });
+    }
+    
+    registerCallbackHandlers() {
+        this.bot.on('callback_query', async (ctx) => {
+            const data = ctx.callbackQuery.data;
+            await ctx.answerCbQuery();
+            
+            // Handle reaction callbacks
+            if (data.startsWith('react:')) {
+                const [_, reactionType, articleId] = data.split(':');
+                await this.handleReaction(ctx, reactionType, articleId);
+                return;
+            }
+            
+            // Handle save callback
+            else if (data.startsWith('save:')) {
+                const articleId = data.split(':')[1];
+                await this.handleSave(ctx, articleId);
+                return;
+            }
+            
+            // Handle share callback  
+            else if (data.startsWith('share:')) {
+                const articleId = data.split(':')[1];
+                await this.handleShare(ctx, articleId);
+                return;
+            }
+            
+            // Handle comment callback
+            else if (data.startsWith('comment:')) {
+                await ctx.answerCbQuery('💬 Comments feature coming soon!', { show_alert: true });
+                return;
+            }
+            
+            // Handle quick add callback
+            else if (data.startsWith('quick_add:')) {
+                const [_, chatId, chatType] = data.split(':');
+                await this.quickAddDestination(ctx, chatId, chatType);
+                return;
+            }
+            
+            // Handle auto add callback
+            else if (data.startsWith('auto_add:')) {
+                const [_, chatId, chatType, ...titleParts] = data.split(':');
+                const title = titleParts.join(':');
+                await this.autoAddDestination(ctx, chatId, chatType, title);
+                return;
+            }
+            
+            // Handle status check callback
+            else if (data.startsWith('check_status:')) {
+                const chatId = data.split(':')[1];
+                await this.checkBotStatus(ctx, chatId);
+                return;
+            }
+            
+            // Handle scheduling callbacks
+            else if (data.startsWith('schedule:')) {
+                const action = data.split(':')[1];
+                await this.handleScheduleCallback(ctx, action);
+                return;
+            }
+            
+            // Handle media callbacks
+            else if (data.startsWith('media:')) {
+                const [_, action, fileId] = data.split(':');
+                await this.handleMediaCallback(ctx, action, fileId);
+                return;
+            }
+            
+            // Handle attach media callback
+            else if (data.startsWith('attach_media:')) {
+                const [_, fileId, articleId] = data.split(':');
+                await this.attachMediaToArticle(ctx, fileId, articleId);
+                return;
+            }
+            
+            // Handle settings callbacks
+            else if (data.startsWith('settings:')) {
+                const setting = data.split(':')[1];
+                await this.handleSettingsCallback(ctx, setting);
+                return;
+            }
+            
+            // Handle save article callback
+            else if (data.startsWith('save:')) {
+                const articleId = data.split(':')[1];
+                await this.saveArticle(ctx, articleId);
+                return;
+            }
+            
+            // Handle share callback
+            else if (data.startsWith('share:')) {
+                const articleId = data.split(':')[1];
+                await this.shareArticle(ctx, articleId);
+                return;
+            }
+            
+            // Handle comment callback
+            else if (data.startsWith('comment:')) {
+                const articleId = data.split(':')[1];
+                await this.handleComment(ctx, articleId);
+                return;
+            }
+            
+            // Handle how to use callback
+            else if (data === 'how_to_use') {
+                await ctx.editMessageText(
+                    '📖 *How to Use Zone News Bot*\n\n' +
+                    '*For Channel/Group Owners:*\n' +
+                    '1️⃣ Add @ZoneNewsBot to your channel/group\n' +
+                    '2️⃣ Make the bot an admin\n' +
+                    '3️⃣ Send any of these to register:\n' +
+                    '   • Forward a message from your channel\n' +
+                    '   • Send your channel link (@username)\n' +
+                    '   • Use /addchannel or /addgroup\n\n' +
+                    '*Quick Add Methods:*\n' +
+                    '• Forward any message → Auto-detect\n' +
+                    '• Send @channelname → Quick lookup\n' +
+                    '• Send t.me/channel → Parse link\n' +
+                    '• Use chat ID: /addchannel -1001234567890\n\n' +
+                    '*Posting News:*\n' +
+                    '• /post - Start posting wizard\n' +
+                    '• Choose single or linked posting\n' +
+                    '• Select your articles\n' +
+                    '• Auto-forward with reactions\n\n' +
+                    '*Need Help?*\n' +
+                    '@ZoneNewsSupport',
+                    { 
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [[
+                                { text: '« Back', callback_data: 'start' }
+                            ]]
+                        }
+                    }
+                );
+                return;
+            }
+            
+            // Handle start callback (go back to start)
+            else if (data === 'start') {
+                // Re-run start command logic
+                const [totalUsers, totalChannels, totalGroups, totalArticles] = await Promise.all([
+                    this.db.collection('users').countDocuments(),
+                    this.db.collection('destinations').countDocuments({ type: 'channel' }),
+                    this.db.collection('destinations').countDocuments({ type: { $in: ['group', 'forum'] } }),
+                    this.db.collection('news_articles').countDocuments()
+                ]);
+                
+                const monthlyUsers = 3; // Simplified for now
+                
+                await ctx.editMessageText(
+                    '🎯 *Welcome to Zone News Bot!*\n\n' +
+                    'Adelaide\'s premier automated news distribution system\n\n' +
+                    '📊 *Statistics:*\n' +
+                    `👥 ${monthlyUsers} monthly users\n` +
+                    `📢 ${totalChannels} channels connected\n` +
+                    `👥 ${totalGroups} groups active\n` +
+                    `📰 ${totalArticles.toLocaleString()} articles shared\n\n` +
+                    '🚀 *Features:*\n' +
+                    '• Auto-post to multiple channels\n' +
+                    '• Smart content scheduling\n' +
+                    '• Native Telegram reactions\n' +
+                    '• Analytics & insights\n' +
+                    '• Forward from any channel to add',
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { 
+                                        text: '➕ Add to Channel', 
+                                        url: `https://t.me/${ctx.botInfo.username}?startchannel=true` 
+                                    },
+                                    { 
+                                        text: '➕ Add to Group', 
+                                        url: `https://t.me/${ctx.botInfo.username}?startgroup=true` 
+                                    }
+                                ],
+                                [
+                                    { text: '📰 Latest News', callback_data: 'news' },
+                                    { text: '📱 Mini App', web_app: { url: 'http://67.219.107.230/telegram-mini-app/' } }
+                                ],
+                                [
+                                    { text: '📖 How to Use', callback_data: 'how_to_use' },
+                                    { text: '💬 Support', url: 'https://t.me/ZoneNewsSupport' }
+                                ],
+                                ctx.isAdmin ? [{ text: '👑 Admin Panel', callback_data: 'admin' }] : []
+                            ].filter(row => row.length > 0)
+                        }
+                    }
+                );
+                return;
+            }
+            
+            // Basic callbacks
+            if (data === 'news') {
+                await this.sendLatestNews(ctx);
+            } else if (data === 'search') {
+                await ctx.reply('Enter your search term:');
+                // Set state for search
+                this.bot.context?.botService?.setState(ctx.from.id, { 
+                    action: 'search',
+                    step: 'waiting_for_term'
+                });
+            } else if (data === 'admin' && ctx.isAdmin) {
+                await this.showAdminPanel(ctx);
+            } else if (data === 'close') {
+                await ctx.deleteMessage();
+            } else if (data === 'post' && ctx.isAdmin) {
+                // Start post workflow
+                await this.startPostWorkflow(ctx);
+            } else if (data === 'destinations' && ctx.isAdmin) {
+                // Show destinations
+                const destinations = await this.getDestinations();
+                if (destinations.length === 0) {
+                    await ctx.editMessageText('No destinations configured. Use /addchannel or /addgroup first.');
+                } else {
+                    const list = destinations.map((dest, i) => 
+                        `${i + 1}. ${dest.type === 'channel' ? '📢' : '👥'} ${dest.name || dest.id}`
+                    ).join('\n');
+                    await ctx.editMessageText(`📋 *Destinations:*\n\n${list}`, { parse_mode: 'Markdown' });
+                }
+            }
+            
+            // Setup callbacks
+            else if (data === 'setup_channels') {
+                await ctx.editMessageText(
+                    '📢 *Add Channels*\n\n' +
+                    'To add a channel:\n' +
+                    '1. Add the bot as admin to your channel\n' +
+                    '2. Use /addchannel @channelname\n\n' +
+                    'Or use /discover to auto-find channels',
+                    { parse_mode: 'Markdown' }
+                );
+            } else if (data === 'setup_admins') {
+                await ctx.editMessageText(
+                    '👥 *Manage Admins*\n\n' +
+                    'Current admin commands:\n' +
+                    '• /addchannel - Add a channel\n' +
+                    '• /addgroup - Add a group\n' +
+                    '• /removedestination - Remove destination\n' +
+                    '• /broadcast - Send to all destinations',
+                    { parse_mode: 'Markdown' }
+                );
+            } else if (data === 'setup_schedules') {
+                await ctx.editMessageText(
+                    '⏰ *Configure Schedules*\n\n' +
+                    '/schedule [time] [destination]\n\n' +
+                    'Examples:\n' +
+                    '• /schedule daily 09:00 @channel\n' +
+                    '• /schedule tomorrow 14:30 @channel',
+                    { parse_mode: 'Markdown' }
+                );
+            } else if (data === 'setup_discover') {
+                await ctx.editMessageText(
+                    '🔍 *Channel Discovery*\n\n' +
+                    'Use /discover to find channels where the bot is admin',
+                    { parse_mode: 'Markdown' }
+                );
+            }
+            
+            // Posting mode selection
+            else if (data === 'post_single') {
+                const destinations = await this.getDestinations();
+                await ctx.editMessageText('Select destination:', {
+                    reply_markup: {
+                        inline_keyboard: destinations.map(dest => [{
+                            text: `${dest.type === 'channel' ? '📢' : '👥'} ${dest.name || dest.id}`,
+                            callback_data: `dest:${dest._id}`
+                        }])
+                    }
+                });
+            }
+            
+            else if (data === 'post_linked') {
+                const destinations = await this.getDestinations();
+                const channels = destinations.filter(d => d.type === 'channel');
+                
+                if (channels.length === 0) {
+                    await ctx.editMessageText('No channels configured. Add a channel first with /addchannel');
+                    return;
+                }
+                
+                await ctx.editMessageText(
+                    '🔗 *Linked Posting*\n\n' +
+                    'This will:\n' +
+                    '1. Post to a channel\n' +
+                    '2. Forward to selected groups\n' +
+                    '3. Add "Join Channel" button\n\n' +
+                    'Select primary channel:',
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: channels.map(ch => [{
+                                text: `📢 ${ch.name || ch.id}`,
+                                callback_data: `linked_channel:${ch._id}`
+                            }])
+                        }
+                    }
+                );
+            }
+            
+            else if (data.startsWith('linked_channel:')) {
+                const channelId = data.split(':')[1];
+                // Store channel and show group selection
+                if (this.bot.context?.botService) {
+                    this.bot.context.botService.setState(ctx.from.id, {
+                        action: 'linked_post',
+                        channel_id: channelId,
+                        step: 'select_groups'
+                    });
+                }
+                
+                const destinations = await this.getDestinations();
+                const groups = destinations.filter(d => d.type === 'group' || d.type === 'forum');
+                
+                await ctx.editMessageText(
+                    '👥 Select groups to forward to:',
+                    {
+                        reply_markup: {
+                            inline_keyboard: [
+                                ...groups.map(g => [{
+                                    text: `☐ ${g.name || g.id}`,
+                                    callback_data: `toggle_group:${g._id}`
+                                }]),
+                                [{ text: '✅ Continue', callback_data: 'linked_continue' }],
+                                [{ text: '❌ Cancel', callback_data: 'close' }]
+                            ]
+                        }
+                    }
+                );
+            }
+            
+            else if (data.startsWith('toggle_group:')) {
+                const groupId = data.split(':')[1];
+                const state = this.bot.context?.botService?.getState(ctx.from.id);
+                
+                if (state) {
+                    state.selected_groups = state.selected_groups || [];
+                    const index = state.selected_groups.indexOf(groupId);
+                    
+                    if (index > -1) {
+                        state.selected_groups.splice(index, 1);
+                    } else {
+                        state.selected_groups.push(groupId);
+                    }
+                    
+                    // Update keyboard to show selection
+                    const destinations = await this.getDestinations();
+                    const groups = destinations.filter(d => d.type === 'group' || d.type === 'forum');
+                    
+                    await ctx.editMessageReplyMarkup({
+                        inline_keyboard: [
+                            ...groups.map(g => [{
+                                text: `${state.selected_groups.includes(g._id.toString()) ? '☑' : '☐'} ${g.name || g.id}`,
+                                callback_data: `toggle_group:${g._id}`
+                            }]),
+                            [{ text: '✅ Continue', callback_data: 'linked_continue' }],
+                            [{ text: '❌ Cancel', callback_data: 'close' }]
+                        ]
+                    });
+                }
+            }
+            
+            else if (data === 'linked_continue') {
+                const state = this.bot.context?.botService?.getState(ctx.from.id);
+                if (state && state.selected_groups?.length > 0) {
+                    // Show article selection
+                    await this.showArticleSelectionForLinked(ctx, state);
+                } else {
+                    await ctx.answerCbQuery('Please select at least one group', { show_alert: true });
+                }
+            }
+            
+            // Destination selection for posting
+            else if (data.startsWith('dest:')) {
+                const destId = data.split(':')[1];
+                // Show article selection
+                await this.showArticleSelection(ctx, destId);
+            }
+            
+            // Linked article selection
+            else if (data.startsWith('linked_article:')) {
+                const articleId = data.split(':')[1];
+                const state = this.bot.context?.botService?.getState(ctx.from.id);
+                
+                if (state && state.channel_id && state.selected_groups) {
+                    await ctx.editMessageText('🔄 Posting to channel and forwarding to groups...');
+                    await this.postLinkedContent(ctx, articleId, state.channel_id, state.selected_groups);
+                    this.bot.context.botService.clearState(ctx.from.id);
+                }
+            }
+            
+            // Article selection for posting
+            else if (data.startsWith('post_article:')) {
+                const [, destId, articleId] = data.split(':');
+                await this.postArticleToDestination(ctx, destId, articleId);
+            }
+            
+            // Post latest news
+            else if (data.startsWith('post_latest:')) {
+                const destId = data.split(':')[1];
+                await this.postLatestToDestination(ctx, destId);
+            }
+            
+            // Post custom message
+            else if (data.startsWith('post_custom:')) {
+                const destId = data.split(':')[1];
+                await ctx.editMessageText('📝 Enter your custom message:');
+                // Set state for custom message
+                if (this.bot.context?.botService) {
+                    this.bot.context.botService.setState(ctx.from.id, {
+                        action: 'post_custom',
+                        destination_id: destId,
+                        step: 'waiting_for_message'
+                    });
+                }
+            }
+            
+            // Destination removal
+            else if (data.startsWith('remove_dest:')) {
+                const destId = data.split(':')[1];
+                try {
+                    const { ObjectId } = require('mongodb');
+                    await this.db.collection('destinations').deleteOne({
+                        _id: new ObjectId(destId)
+                    });
+                    await ctx.editMessageText('✅ Destination removed successfully');
+                } catch (err) {
+                    await ctx.editMessageText('❌ Failed to remove destination');
+                }
+            }
+            
+            // Reaction callbacks
+            else if (data.startsWith('like_') || data.startsWith('love_') || data.startsWith('fire_')) {
+                const [reaction, articleId, currentCount] = data.split('_');
+                const newCount = parseInt(currentCount) + 1;
+                
+                // Update reaction count in database
+                await this.db.collection('article_reactions').updateOne(
+                    { article_id: articleId, reaction: reaction },
+                    { 
+                        $inc: { count: 1 },
+                        $addToSet: { users: ctx.from.id }
+                    },
+                    { upsert: true }
+                );
+                
+                // Update button text
+                const keyboard = ctx.callbackQuery.message.reply_markup;
+                if (keyboard && keyboard.inline_keyboard) {
+                    for (const row of keyboard.inline_keyboard) {
+                        for (const button of row) {
+                            if (button.callback_data === data) {
+                                const emoji = reaction === 'like' ? '👍' : reaction === 'love' ? '❤️' : '🔥';
+                                button.text = `${emoji} ${newCount}`;
+                                button.callback_data = `${reaction}_${articleId}_${newCount}`;
+                            }
+                        }
+                    }
+                    
+                    await ctx.editMessageReplyMarkup(keyboard);
+                }
+                
+                await ctx.answerCbQuery(`You ${reaction}d this article!`);
+                return; // Don't continue to other handlers
+            }
+            
+            // Settings callbacks
+            else if (data === 'settings_menu') {
+                const settings = await this.getUserSettings(ctx.from.id);
+                
+                const text = 
+                    '⚙️ *Settings*\n\n' +
+                    `🔔 Notifications: ${settings?.notifications ? 'On' : 'Off'}\n` +
+                    `🌐 Language: ${settings?.language || 'English'}\n` +
+                    `📰 Categories: ${settings?.categories?.join(', ') || 'All'}\n\n` +
+                    'Select an option to change:';
+                
+                const keyboard = {
+                    inline_keyboard: [
+                        [{ text: settings?.notifications ? '🔕 Disable Notifications' : '🔔 Enable Notifications', 
+                           callback_data: 'toggle_notifications' }],
+                        [{ text: '📂 Select Categories', callback_data: 'select_categories' }],
+                        [{ text: '📱 Mini App Settings', web_app: { url: 'https://thezonenews.com/telegram-mini-app' } }],
+                        [{ text: '❌ Close', callback_data: 'close' }]
+                    ]
+                };
+                
+                await ctx.editMessageText(text, {
+                    parse_mode: 'Markdown',
+                    reply_markup: keyboard
+                });
+            }
+            else if (data === 'toggle_notifications') {
+                const userId = ctx.from.id;
+                const settings = await this.getUserSettings(userId);
+                await this.db.collection('user_settings').updateOne(
+                    { user_id: userId },
+                    { $set: { notifications: !settings?.notifications } },
+                    { upsert: true }
+                );
+                await ctx.answerCbQuery('✅ Settings updated');
+                // Refresh settings display
+                ctx.callbackQuery.message.text = '/settings';
+                await this.bot.handleUpdate(ctx.update);
+            } else if (data === 'select_categories') {
+                await ctx.editMessageText(
+                    '📂 *Select Categories*\n\n' +
+                    'Feature coming soon!',
+                    { parse_mode: 'Markdown' }
+                );
+            }
+        });
+    }
+    
+    registerTextHandler() {
+        // Handle text for interactive flows
+        this.bot.on('text', async (ctx) => {
+            if (!ctx.from) return;
+            
+            // Check if it's a channel/group link or username
+            const text = ctx.message.text;
+            const channelRegex = /(?:https?:\/\/)?(?:t\.me|telegram\.me)\/([a-zA-Z0-9_]+)|@([a-zA-Z0-9_]+)/;
+            const match = text.match(channelRegex);
+            
+            if (match && ctx.isAdmin) {
+                const username = match[1] || match[2];
+                await this.handleQuickAdd(ctx, username);
+                return;
+            }
+            
+            if (!this.bot.context?.botService) return;
+            
+            const state = this.bot.context.botService.getState(ctx.from.id);
+            if (!state) return;
+            
+            // Handle search
+            if (state.action === 'search' && state.step === 'waiting_for_term') {
+                await this.performSearch(ctx, ctx.message.text);
+                this.bot.context.botService.clearState(ctx.from.id);
+            }
+            
+            // Handle custom post message
+            else if (state.action === 'post_custom' && state.step === 'waiting_for_message') {
+                const destination = await this.db.collection('destinations').findOne({
+                    _id: new (require('mongodb').ObjectId)(state.destination_id)
+                });
+                
+                if (destination) {
+                    try {
+                        await this.bot.telegram.sendMessage(destination.id, ctx.message.text, {
+                            parse_mode: 'Markdown'
+                        });
+                        await ctx.reply('✅ Message posted successfully!');
+                    } catch (err) {
+                        await ctx.reply(`❌ Failed to post: ${err.message}`);
+                    }
+                }
+                
+                this.bot.context.botService.clearState(ctx.from.id);
+            }
+        });
+        
+        // Handle forwarded messages for auto-detection
+        this.bot.on('forward_date', async (ctx) => {
+            if (!ctx.isAdmin) return;
+            
+            const forwardFrom = ctx.message.forward_from_chat;
+            if (!forwardFrom) return;
+            
+            await this.handleForwardedChannel(ctx, forwardFrom);
+        });
+    }
+    
+    // Helper methods
+    async sendLatestNews(ctx) {
+        try {
+            const articles = await this.db.collection('news_articles')
+                .find({})
+                .sort({ published_date: -1 })
+                .limit(5)
+                .toArray();
+            
+            if (articles.length === 0) {
+                return ctx.reply('📰 No news articles available');
+            }
+            
+            for (const article of articles) {
+                const text = this.formatArticle(article);
+                
+                // Create inline keyboard with reactions and actions
+                const keyboard = {
+                    inline_keyboard: [
+                        [
+                            { text: '👍 0', callback_data: `like_${article._id}_0` },
+                            { text: '❤️ 0', callback_data: `love_${article._id}_0` },
+                            { text: '🔥 0', callback_data: `fire_${article._id}_0` }
+                        ],
+                        [
+                            { text: '📖 Read More', url: article.url || `https://thezonenews.com/article/${article._id}` },
+                            { text: '🔗 Share', url: `https://t.me/share/url?url=${encodeURIComponent(article.url || 'https://thezonenews.com')}` }
+                        ]
+                    ]
+                };
+                
+                // Get existing reaction counts
+                const reactions = await this.db.collection('article_reactions')
+                    .find({ article_id: article._id.toString() })
+                    .toArray();
+                
+                // Update reaction counts in keyboard
+                for (const reaction of reactions) {
+                    const buttonIndex = reaction.reaction === 'like' ? 0 : reaction.reaction === 'love' ? 1 : 2;
+                    const emoji = reaction.reaction === 'like' ? '👍' : reaction.reaction === 'love' ? '❤️' : '🔥';
+                    keyboard.inline_keyboard[0][buttonIndex].text = `${emoji} ${reaction.count || 0}`;
+                    keyboard.inline_keyboard[0][buttonIndex].callback_data = `${reaction.reaction}_${article._id}_${reaction.count || 0}`;
+                }
+                
+                await ctx.reply(text, { 
+                    parse_mode: 'Markdown',
+                    reply_markup: keyboard
+                });
+            }
+            
+            // Add navigation buttons at the end
+            const navKeyboard = {
+                inline_keyboard: [
+                    [
+                        { text: '🔄 Refresh News', callback_data: 'news' },
+                        { text: '📱 Open Mini App', web_app: { url: 'https://thezonenews.com/telegram-mini-app' } }
+                    ],
+                    [
+                        { text: '🔍 Search Articles', callback_data: 'search' },
+                        { text: '⚙️ Settings', callback_data: 'settings_menu' }
+                    ]
+                ]
+            };
+            
+            await ctx.reply('📰 *More options:*', {
+                parse_mode: 'Markdown',
+                reply_markup: navKeyboard
+            });
+            
+        } catch (error) {
+            console.error('Error fetching news:', error);
+            await ctx.reply('❌ Failed to fetch news');
+        }
+    }
+    
+    async performSearch(ctx, searchTerm) {
+        try {
+            const articles = await this.db.collection('news_articles')
+                .find({
+                    $or: [
+                        { title: { $regex: searchTerm, $options: 'i' } },
+                        { content: { $regex: searchTerm, $options: 'i' } }
+                    ]
+                })
+                .limit(5)
+                .toArray();
+            
+            if (articles.length === 0) {
+                return ctx.reply(`No articles found for "${searchTerm}"`);
+            }
+            
+            let resultsText = `🔍 *Search Results:*\n\n`;
+            articles.forEach((article, i) => {
+                resultsText += `${i + 1}. ${article.title}\n`;
+            });
+            
+            await ctx.reply(resultsText, { parse_mode: 'Markdown' });
+        } catch (error) {
+            console.error('Search error:', error);
+            await ctx.reply('❌ Search failed');
+        }
+    }
+    
+    async showAdminPanel(ctx) {
+        const text = '👑 *Admin Panel*\n\nSelect an action:';
+        
+        const keyboard = {
+            inline_keyboard: [
+                [{ text: '📝 Post Article', callback_data: 'post' }],
+                [{ text: '📢 Destinations', callback_data: 'destinations' }],
+                [{ text: '❌ Close', callback_data: 'close' }]
+            ]
+        };
+        
+        await ctx.reply(text, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
+        });
+    }
+    
+    async getDestinations() {
+        return await this.db.collection('destinations').find({}).toArray();
+    }
+    
+    async startPostWorkflow(ctx) {
+        const destinations = await this.getDestinations();
+        
+        if (destinations.length === 0) {
+            return ctx.editMessageText('No destinations configured. Use /addchannel or /addgroup first.');
+        }
+        
+        const keyboard = {
+            inline_keyboard: destinations.map(dest => [{
+                text: `${dest.type === 'channel' ? '📢' : '👥'} ${dest.name || dest.id}`,
+                callback_data: `dest:${dest._id}`
+            }])
+        };
+        
+        keyboard.inline_keyboard.push([{ text: '❌ Cancel', callback_data: 'close' }]);
+        
+        await ctx.editMessageText('📮 Select destination for posting:', {
+            reply_markup: keyboard
+        });
+    }
+    
+    async showArticleSelection(ctx, destId) {
+        // Get latest articles
+        const articles = await this.db.collection('news_articles')
+            .find({})
+            .sort({ published_date: -1 })
+            .limit(5)
+            .toArray();
+        
+        if (articles.length === 0) {
+            return ctx.editMessageText('No articles available to post');
+        }
+        
+        const keyboard = {
+            inline_keyboard: [
+                [{ 
+                    text: '📰 Post Latest Article', 
+                    callback_data: `post_latest:${destId}` 
+                }],
+                ...articles.slice(0, 3).map(article => [{
+                    text: `📄 ${article.title.substring(0, 30)}...`,
+                    callback_data: `post_article:${destId}:${article._id}`
+                }]),
+                [{ 
+                    text: '✏️ Custom Message', 
+                    callback_data: `post_custom:${destId}` 
+                }],
+                [{ text: '❌ Cancel', callback_data: 'close' }]
+            ]
+        };
+        
+        await ctx.editMessageText('📝 Select what to post:', {
+            reply_markup: keyboard
+        });
+    }
+    
+    async postArticleToDestination(ctx, destId, articleId) {
+        try {
+            const { ObjectId } = require('mongodb');
+            
+            const destination = await this.db.collection('destinations').findOne({
+                _id: new ObjectId(destId)
+            });
+            
+            const article = await this.db.collection('news_articles').findOne({
+                _id: new ObjectId(articleId)
+            });
+            
+            if (!destination || !article) {
+                return ctx.editMessageText('❌ Destination or article not found');
+            }
+            
+            const message = this.formatArticle(article);
+            const options = { parse_mode: 'Markdown' };
+            
+            // Handle forum topics
+            if (destination.is_forum && destination.default_thread_id) {
+                options.message_thread_id = destination.default_thread_id;
+            }
+            
+            await this.bot.telegram.sendMessage(destination.id, message, options);
+            
+            await ctx.editMessageText(
+                `✅ Posted successfully!\n\n` +
+                `📰 Article: ${article.title}\n` +
+                `📍 Destination: ${destination.name || destination.id}`
+            );
+            
+        } catch (error) {
+            await ctx.editMessageText(`❌ Failed to post: ${error.message}`);
+        }
+    }
+    
+    async postLatestToDestination(ctx, destId) {
+        try {
+            const { ObjectId } = require('mongodb');
+            
+            const destination = await this.db.collection('destinations').findOne({
+                _id: new ObjectId(destId)
+            });
+            
+            const article = await this.db.collection('news_articles')
+                .findOne({}, { sort: { published_date: -1 } });
+            
+            if (!destination || !article) {
+                return ctx.editMessageText('❌ No articles available or destination not found');
+            }
+            
+            const message = this.formatArticle(article);
+            const options = { parse_mode: 'Markdown' };
+            
+            // Handle forum topics
+            if (destination.is_forum && destination.default_thread_id) {
+                options.message_thread_id = destination.default_thread_id;
+            }
+            
+            await this.bot.telegram.sendMessage(destination.id, message, options);
+            
+            await ctx.editMessageText(
+                `✅ Latest article posted!\n\n` +
+                `📰 ${article.title}\n` +
+                `📍 ${destination.name || destination.id}`
+            );
+            
+        } catch (error) {
+            await ctx.editMessageText(`❌ Failed to post: ${error.message}`);
+        }
+    }
+    
+    async getUserSettings(userId) {
+        return await this.db.collection('user_settings').findOne({ user_id: userId });
+    }
+    
+    formatArticle(article) {
+        const date = new Date(article.published_date).toLocaleDateString('en-AU', {
+            day: 'numeric',
+            month: 'short'
+        });
+        
+        return `📰 *${article.title}*\n\n` +
+               `${article.summary || article.content?.substring(0, 200)}...\n\n` +
+               `📅 ${date} | 📂 ${article.category || 'General'}\n` +
+               `👁 ${article.views || 0} views`;
+    }
+    
+    async handleReaction(ctx, reactionType, articleId) {
+        const userId = ctx.from.id;
+        
+        try {
+            // Check if user already reacted
+            const existingReaction = await this.db.collection('user_reactions').findOne({
+                user_id: userId,
+                article_id: articleId,
+                reaction: reactionType
+            });
+            
+            if (existingReaction) {
+                // Remove reaction
+                await this.db.collection('user_reactions').deleteOne({
+                    user_id: userId,
+                    article_id: articleId,
+                    reaction: reactionType
+                });
+                
+                // Decrement count
+                await this.db.collection('news_articles').updateOne(
+                    { _id: new (require('mongodb').ObjectId)(articleId) },
+                    { $inc: { [`reactions.${reactionType}`]: -1 } }
+                );
+                
+                await ctx.answerCbQuery(`Removed ${reactionType} reaction`);
+            } else {
+                // Add reaction
+                await this.db.collection('user_reactions').insertOne({
+                    user_id: userId,
+                    article_id: articleId,
+                    reaction: reactionType,
+                    created_at: new Date()
+                });
+                
+                // Increment count
+                await this.db.collection('news_articles').updateOne(
+                    { _id: new (require('mongodb').ObjectId)(articleId) },
+                    { $inc: { [`reactions.${reactionType}`]: 1 } }
+                );
+                
+                await ctx.answerCbQuery(`Added ${reactionType} reaction!`);
+            }
+            
+            // Update the message with new counts
+            await this.updateReactionButtons(ctx, articleId);
+        } catch (error) {
+            console.error('Error handling reaction:', error);
+            await ctx.answerCbQuery('Failed to update reaction', { show_alert: true });
+        }
+    }
+    
+    async handleSave(ctx, articleId) {
+        const userId = ctx.from.id;
+        
+        try {
+            // Check if already saved
+            const saved = await this.db.collection('saved_articles').findOne({
+                user_id: userId,
+                article_id: articleId
+            });
+            
+            if (saved) {
+                await this.db.collection('saved_articles').deleteOne({
+                    user_id: userId,
+                    article_id: articleId
+                });
+                await ctx.answerCbQuery('Removed from saved articles');
+            } else {
+                await this.db.collection('saved_articles').insertOne({
+                    user_id: userId,
+                    article_id: articleId,
+                    saved_at: new Date()
+                });
+                await ctx.answerCbQuery('✅ Article saved!');
+            }
+        } catch (error) {
+            console.error('Error saving article:', error);
+            await ctx.answerCbQuery('Failed to save article', { show_alert: true });
+        }
+    }
+    
+    async handleShare(ctx, articleId) {
+        const shareUrl = `https://thezonenews.com/article/${articleId}`;
+        await ctx.answerCbQuery();
+        await ctx.reply(
+            `🔗 Share this article:\n${shareUrl}\n\n` +
+            `Or use the button below:`,
+            {
+                reply_markup: {
+                    inline_keyboard: [[
+                        { 
+                            text: '📤 Share on Telegram', 
+                            url: `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}` 
+                        }
+                    ]]
+                }
+            }
+        );
+    }
+    
+    async updateReactionButtons(ctx, articleId) {
+        try {
+            // Get updated article with reaction counts
+            const article = await this.db.collection('news_articles').findOne({
+                _id: new (require('mongodb').ObjectId)(articleId)
+            });
+            
+            if (!article) return;
+            
+            const reactions = article.reactions || {};
+            const likes = reactions.like || 0;
+            const loves = reactions.love || 0;
+            const fires = reactions.fire || 0;
+            
+            // Update inline keyboard
+            const newKeyboard = {
+                inline_keyboard: [
+                    [
+                        { text: `👍 ${likes}`, callback_data: `react:like:${articleId}` },
+                        { text: `❤️ ${loves}`, callback_data: `react:love:${articleId}` },
+                        { text: `🔥 ${fires}`, callback_data: `react:fire:${articleId}` }
+                    ],
+                    [
+                        { text: '💬 Comment', callback_data: `comment:${articleId}` },
+                        { text: '💾 Save', callback_data: `save:${articleId}` },
+                        { text: '🔗 Share', callback_data: `share:${articleId}` }
+                    ]
+                ]
+            };
+            
+            await ctx.editMessageReplyMarkup(newKeyboard);
+        } catch (error) {
+            console.error('Error updating reaction buttons:', error);
+        }
+    }
+    
+    async showArticleSelectionForLinked(ctx, state) {
+        // Get latest articles
+        const articles = await this.db.collection('news_articles')
+            .find({})
+            .sort({ published_date: -1 })
+            .limit(5)
+            .toArray();
+        
+        if (articles.length === 0) {
+            return ctx.editMessageText('No articles available to post');
+        }
+        
+        await ctx.editMessageText(
+            '📰 Select article to post:',
+            {
+                reply_markup: {
+                    inline_keyboard: articles.map(article => [{
+                        text: `📄 ${article.title.substring(0, 40)}...`,
+                        callback_data: `linked_article:${article._id}`
+                    }])
+                }
+            }
+        );
+    }
+    
+    async handleQuickAdd(ctx, username) {
+        // Send processing message
+        const processingMsg = await ctx.reply(
+            '🔍 Detecting channel/group...\n\n' +
+            `Looking up: @${username}`
+        );
+        
+        try {
+            // Try to get chat info
+            const chat = await ctx.telegram.getChat('@' + username);
+            
+            // Check if already exists
+            const existing = await this.db.collection('destinations').findOne({
+                $or: [
+                    { id: chat.id.toString() },
+                    { username: '@' + username }
+                ]
+            });
+            
+            if (existing) {
+                await ctx.telegram.editMessageText(
+                    ctx.chat.id,
+                    processingMsg.message_id,
+                    null,
+                    `✅ *Already Added*\n\n` +
+                    `${chat.type === 'channel' ? '📢' : '👥'} ${chat.title}\n` +
+                    `Username: @${username}\n` +
+                    `Type: ${chat.type}`,
+                    { parse_mode: 'Markdown' }
+                );
+                return;
+            }
+            
+            // Add inline keyboard for confirmation
+            await ctx.telegram.editMessageText(
+                ctx.chat.id,
+                processingMsg.message_id,
+                null,
+                `🔍 *Found ${chat.type === 'channel' ? 'Channel' : 'Group'}*\n\n` +
+                `📌 Name: ${chat.title}\n` +
+                `👤 Username: @${username}\n` +
+                `🆔 ID: \`${chat.id}\`\n` +
+                `📝 Type: ${chat.type}\n` +
+                `${chat.description ? `📄 Description: ${chat.description.substring(0, 100)}...\n` : ''}\n` +
+                `Would you like to add this ${chat.type}?`,
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '✅ Add', callback_data: `quick_add:${chat.id}:${chat.type}` },
+                                { text: '❌ Cancel', callback_data: 'close' }
+                            ]
+                        ]
+                    }
+                }
+            );
+        } catch (error) {
+            await ctx.telegram.editMessageText(
+                ctx.chat.id,
+                processingMsg.message_id,
+                null,
+                `❌ Could not find @${username}\n\n` +
+                `Make sure:\n` +
+                `• The username is correct\n` +
+                `• It's a public channel/group\n` +
+                `• Or use /addchannel with chat ID`
+            );
+        }
+    }
+    
+    async handleForwardedChannel(ctx, forwardFrom) {
+        // Check if already exists
+        const existing = await this.db.collection('destinations').findOne({
+            id: forwardFrom.id.toString()
+        });
+        
+        if (existing) {
+            await ctx.reply(
+                `✅ *Already Added*\n\n` +
+                `${forwardFrom.type === 'channel' ? '📢' : '👥'} ${forwardFrom.title}\n` +
+                `Type: ${forwardFrom.type}\n` +
+                `Added: ${new Date(existing.added_at).toLocaleDateString('en-AU')}`,
+                { parse_mode: 'Markdown' }
+            );
+            return;
+        }
+        
+        // Show info with add button
+        await ctx.reply(
+            `🎯 *Auto-Detected from Forward*\n\n` +
+            `${forwardFrom.type === 'channel' ? '📢 Channel' : '👥 Group'}: ${forwardFrom.title}\n` +
+            `🆔 ID: \`${forwardFrom.id}\`\n` +
+            `${forwardFrom.username ? `👤 @${forwardFrom.username}\n` : ''}\n` +
+            `Would you like to add this ${forwardFrom.type}?`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            { text: '✅ Add to Bot', callback_data: `auto_add:${forwardFrom.id}:${forwardFrom.type}:${forwardFrom.title}` }
+                        ],
+                        [
+                            { text: '🔍 Check Bot Status', callback_data: `check_status:${forwardFrom.id}` }
+                        ],
+                        [
+                            { text: '❌ Cancel', callback_data: 'close' }
+                        ]
+                    ]
+                }
+            }
+        );
+    }
+    
+    async postLinkedContent(ctx, articleId, channelDestId, groupDestIds) {
+        try {
+            const article = await this.db.collection('news_articles').findOne({
+                _id: new (require('mongodb').ObjectId)(articleId)
+            });
+            
+            if (!article) {
+                await ctx.reply('Article not found');
+                return;
+            }
+            
+            // Get channel destination
+            const channel = await this.db.collection('destinations').findOne({
+                _id: new (require('mongodb').ObjectId)(channelDestId)
+            });
+            
+            if (!channel) {
+                await ctx.reply('Channel not found');
+                return;
+            }
+            
+            // Format the message
+            const message = this.formatArticle(article);
+            
+            // Create keyboard with reactions and join button
+            const channelUsername = channel.username || channel.id;
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        { text: `👍 0`, callback_data: `react:like:${articleId}` },
+                        { text: `❤️ 0`, callback_data: `react:love:${articleId}` },
+                        { text: `🔥 0`, callback_data: `react:fire:${articleId}` }
+                    ],
+                    [
+                        { text: '📢 Join Channel', url: `https://t.me/${channelUsername.replace('@', '')}` },
+                        { text: '💬 Discuss', url: `https://t.me/${channelUsername.replace('@', '')}` }
+                    ],
+                    [
+                        { text: '🔗 Share', callback_data: `share:${articleId}` },
+                        { text: '💾 Save', callback_data: `save:${articleId}` }
+                    ]
+                ]
+            };
+            
+            // Post to channel first
+            const channelPost = await ctx.telegram.sendMessage(
+                channel.id,
+                message + '\n\n👁 Views: Will update with native Telegram counter',
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: keyboard
+                }
+            );
+            
+            // Forward to each selected group
+            for (const groupId of groupDestIds) {
+                const group = await this.db.collection('destinations').findOne({
+                    _id: new (require('mongodb').ObjectId)(groupId)
+                });
+                
+                if (group) {
+                    try {
+                        // Forward the message to preserve views counter
+                        await ctx.telegram.forwardMessage(
+                            group.id,
+                            channel.id,
+                            channelPost.message_id
+                        );
+                        
+                        // Send a follow-up with interactive buttons
+                        await ctx.telegram.sendMessage(
+                            group.id,
+                            `💬 *Discussion for above post*\n\n` +
+                            `React and discuss here!`,
+                            {
+                                parse_mode: 'Markdown',
+                                reply_markup: {
+                                    inline_keyboard: [
+                                        [
+                                            { text: `👍 Like`, callback_data: `react:like:${articleId}` },
+                                            { text: `❤️ Love`, callback_data: `react:love:${articleId}` },
+                                            { text: `🔥 Fire`, callback_data: `react:fire:${articleId}` }
+                                        ],
+                                        [
+                                            { text: '📢 Join Channel', url: `https://t.me/${channelUsername.replace('@', '')}` },
+                                            { text: '🔗 Share', url: `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/${channelUsername.replace('@', '')}/${channelPost.message_id}`)}` }
+                                        ]
+                                    ]
+                                }
+                            }
+                        );
+                    } catch (error) {
+                        console.error(`Failed to forward to group ${group.name}:`, error.message);
+                    }
+                }
+            }
+            
+            // Store posting record
+            await this.db.collection('posted_articles').insertOne({
+                article_id: articleId,
+                channel_id: channelDestId,
+                channel_message_id: channelPost.message_id,
+                forwarded_to: groupDestIds,
+                posted_at: new Date(),
+                posted_by: ctx.from.id
+            });
+            
+            await ctx.reply(
+                `✅ *Posted Successfully!*\n\n` +
+                `📢 Channel: ${channel.name}\n` +
+                `👥 Forwarded to: ${groupDestIds.length} groups\n` +
+                `👁 Native Telegram views enabled\n` +
+                `💬 Discussion links added`,
+                { parse_mode: 'Markdown' }
+            );
+        } catch (error) {
+            console.error('Error in linked posting:', error);
+            await ctx.reply(`❌ Failed to post: ${error.message}`);
+        }
+    }
+    
+    async quickAddDestination(ctx, chatId, chatType) {
+        try {
+            await this.db.collection('destinations').insertOne({
+                id: chatId,
+                type: chatType,
+                verified: true,
+                added_at: new Date(),
+                added_by: ctx.from.id,
+                added_via: 'quick_add'
+            });
+            
+            await ctx.editMessageText(
+                `✅ Successfully added ${chatType}!\n\n` +
+                `Use /destinations to view all destinations\n` +
+                `Use /post to start posting`,
+                { parse_mode: 'Markdown' }
+            );
+        } catch (error) {
+            await ctx.editMessageText(`❌ Failed to add: ${error.message}`);
+        }
+    }
+    
+    async autoAddDestination(ctx, chatId, chatType, title) {
+        try {
+            await this.db.collection('destinations').insertOne({
+                id: chatId,
+                type: chatType,
+                name: title,
+                verified: true,
+                added_at: new Date(),
+                added_by: ctx.from.id,
+                added_via: 'forward'
+            });
+            
+            await ctx.editMessageText(
+                `✅ *Successfully Added!*\n\n` +
+                `${chatType === 'channel' ? '📢' : '👥'} ${title}\n` +
+                `🆔 ID: \`${chatId}\`\n\n` +
+                `You can now post to this ${chatType} using /post`,
+                { parse_mode: 'Markdown' }
+            );
+        } catch (error) {
+            await ctx.editMessageText(`❌ Failed to add: ${error.message}`);
+        }
+    }
+    
+    async checkBotStatus(ctx, chatId) {
+        try {
+            const member = await ctx.telegram.getChatMember(chatId, ctx.botInfo.id);
+            const statusEmoji = member.status === 'administrator' ? '✅' : '⚠️';
+            
+            await ctx.answerCbQuery(
+                `${statusEmoji} Bot is ${member.status} in this chat`,
+                { show_alert: true }
+            );
+        } catch (error) {
+            await ctx.answerCbQuery(
+                '❌ Bot is not in this chat',
+                { show_alert: true }
+            );
+        }
+    }
+    
+    async handleScheduleCallback(ctx, action) {
+        try {
+            await ctx.answerCbQuery();
+            
+            switch (action) {
+                case 'new':
+                    await this.showScheduleNewPost(ctx);
+                    break;
+                case 'view':
+                    await this.showScheduledPosts(ctx);
+                    break;
+                case 'auto':
+                    await this.showAutoPostSettings(ctx);
+                    break;
+                case 'clear':
+                    await this.clearScheduledPosts(ctx);
+                    break;
+                default:
+                    if (action.startsWith('cancel_')) {
+                        const postId = action.replace('cancel_', '');
+                        await this.cancelScheduledPost(ctx, postId);
+                    } else if (action.startsWith('article_')) {
+                        const articleId = action.replace('article_', '');
+                        await this.scheduleArticle(ctx, articleId);
+                    } else if (action.startsWith('time_')) {
+                        const [articleId, time] = action.replace('time_', '').split('_');
+                        await this.confirmSchedule(ctx, articleId, time);
+                    }
+                    break;
+            }
+        } catch (error) {
+            console.error('Schedule callback error:', error);
+            await ctx.editMessageText('❌ An error occurred');
+        }
+    }
+    
+    async showScheduleNewPost(ctx) {
+        // Get recent articles
+        const articles = await this.db.collection('news_articles')
+            .find({})
+            .sort({ published_date: -1 })
+            .limit(10)
+            .toArray();
+        
+        if (articles.length === 0) {
+            return ctx.editMessageText('📰 No articles available to schedule');
+        }
+        
+        await ctx.editMessageText(
+            '📅 *Schedule New Post*\n\nSelect an article to schedule:',
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: articles.map(article => [{
+                        text: `📰 ${article.title.substring(0, 40)}...`,
+                        callback_data: `schedule:article_${article._id}`
+                    }])
+                }
+            }
+        );
+    }
+    
+    async scheduleArticle(ctx, articleId) {
+        // Show time selection
+        const now = new Date();
+        const timeOptions = [
+            { label: 'In 30 minutes', minutes: 30 },
+            { label: 'In 1 hour', minutes: 60 },
+            { label: 'In 2 hours', minutes: 120 },
+            { label: 'In 4 hours', minutes: 240 },
+            { label: 'Tomorrow 9 AM', minutes: this.getMinutesUntilTime(9, 0) },
+            { label: 'Tomorrow 12 PM', minutes: this.getMinutesUntilTime(12, 0) },
+            { label: 'Tomorrow 6 PM', minutes: this.getMinutesUntilTime(18, 0) }
+        ];
+        
+        await ctx.editMessageText(
+            '⏰ *Select Schedule Time*\n\nWhen should this post be published?',
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: timeOptions.map(option => [{
+                        text: option.label,
+                        callback_data: `schedule:time_${articleId}_${option.minutes}`
+                    }])
+                }
+            }
+        );
+    }
+    
+    async confirmSchedule(ctx, articleId, minutes) {
+        const { ObjectId } = require('mongodb');
+        const scheduledFor = new Date();
+        scheduledFor.setMinutes(scheduledFor.getMinutes() + parseInt(minutes));
+        
+        // Get destinations
+        const destinations = await this.db.collection('destinations').find({}).toArray();
+        
+        if (destinations.length === 0) {
+            return ctx.editMessageText('📍 No destinations configured. Add channels/groups first.');
+        }
+        
+        // For now, schedule to all destinations (could add selection later)
+        const destIds = destinations.map(d => d._id.toString());
+        
+        // Create scheduled post
+        const result = await this.db.collection('scheduled_posts').insertOne({
+            article_id: articleId,
+            destinations: destIds,
+            scheduled_for: scheduledFor,
+            scheduled_by: ctx.from.id,
+            created_at: new Date(),
+            status: 'pending'
+        });
+        
+        await ctx.editMessageText(
+            '✅ *Post Scheduled!*\n\n' +
+            `📅 Will be posted on: ${scheduledFor.toLocaleString('en-AU')}\n` +
+            `📍 To ${destinations.length} destination(s)\n\n` +
+            'Use /schedule to manage scheduled posts',
+            { parse_mode: 'Markdown' }
+        );
+    }
+    
+    async showScheduledPosts(ctx) {
+        const posts = await this.db.collection('scheduled_posts')
+            .find({ 
+                status: 'pending',
+                scheduled_for: { $gte: new Date() }
+            })
+            .sort({ scheduled_for: 1 })
+            .toArray();
+        
+        if (posts.length === 0) {
+            return ctx.editMessageText('📅 No scheduled posts');
+        }
+        
+        let text = '📅 *All Scheduled Posts*\n\n';
+        const buttons = [];
+        
+        for (const post of posts) {
+            const article = await this.db.collection('news_articles')
+                .findOne({ _id: new ObjectId(post.article_id) });
+            
+            const time = new Date(post.scheduled_for).toLocaleString('en-AU');
+            text += `• ${article?.title || 'Unknown'}\n  ⏰ ${time}\n\n`;
+            
+            buttons.push([{
+                text: `❌ Cancel: ${article?.title?.substring(0, 20)}...`,
+                callback_data: `schedule:cancel_${post._id}`
+            }]);
+        }
+        
+        await ctx.editMessageText(text, {
+            parse_mode: 'Markdown',
+            reply_markup: { inline_keyboard: buttons }
+        });
+    }
+    
+    async showAutoPostSettings(ctx) {
+        await ctx.editMessageText(
+            '⏰ *Auto-Posting Settings*\n\n' +
+            'Configure automatic posting schedule:\n\n' +
+            '• Morning (9 AM daily)\n' +
+            '• Afternoon (2 PM daily)\n' +
+            '• Evening (6 PM daily)\n' +
+            '• Every 4 hours\n' +
+            '• Weekdays only\n\n' +
+            '_Select a schedule to enable auto-posting_',
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '🌅 Morning (9 AM)', callback_data: 'auto:morning' }],
+                        [{ text: '☀️ Afternoon (2 PM)', callback_data: 'auto:afternoon' }],
+                        [{ text: '🌆 Evening (6 PM)', callback_data: 'auto:evening' }],
+                        [{ text: '⏱️ Every 4 hours', callback_data: 'auto:4hours' }],
+                        [{ text: '💼 Weekdays only', callback_data: 'auto:weekdays' }]
+                    ]
+                }
+            }
+        );
+    }
+    
+    async clearScheduledPosts(ctx) {
+        const result = await this.db.collection('scheduled_posts').updateMany(
+            { status: 'pending', scheduled_by: ctx.from.id },
+            { $set: { status: 'cancelled', cancelled_at: new Date() } }
+        );
+        
+        await ctx.editMessageText(
+            `✅ Cleared ${result.modifiedCount} scheduled posts`,
+            { parse_mode: 'Markdown' }
+        );
+    }
+    
+    async cancelScheduledPost(ctx, postId) {
+        const { ObjectId } = require('mongodb');
+        
+        await this.db.collection('scheduled_posts').updateOne(
+            { _id: new ObjectId(postId) },
+            { $set: { status: 'cancelled', cancelled_at: new Date() } }
+        );
+        
+        await ctx.editMessageText('✅ Scheduled post cancelled');
+    }
+    
+    getMinutesUntilTime(hour, minute) {
+        const now = new Date();
+        const target = new Date();
+        target.setDate(target.getDate() + 1);
+        target.setHours(hour, minute, 0, 0);
+        
+        return Math.floor((target - now) / 60000);
+    }
+    
+    registerMediaHandler() {
+        const MediaService = require('./media-service');
+        this.mediaService = new MediaService(this.bot, this.db);
+        
+        // Handle photo messages
+        this.bot.on('photo', async (ctx) => {
+            if (!ctx.isAdmin) return;
+            await this.mediaService.handleMediaMessage(ctx);
+        });
+        
+        // Handle video messages
+        this.bot.on('video', async (ctx) => {
+            if (!ctx.isAdmin) return;
+            await this.mediaService.handleMediaMessage(ctx);
+        });
+        
+        // Handle document messages
+        this.bot.on('document', async (ctx) => {
+            if (!ctx.isAdmin) return;
+            await this.mediaService.handleMediaMessage(ctx);
+        });
+        
+        // Handle animation (GIF) messages
+        this.bot.on('animation', async (ctx) => {
+            if (!ctx.isAdmin) return;
+            await this.mediaService.handleMediaMessage(ctx);
+        });
+        
+        // Handle audio messages
+        this.bot.on('audio', async (ctx) => {
+            if (!ctx.isAdmin) return;
+            await this.mediaService.handleMediaMessage(ctx);
+        });
+    }
+    
+    async handleMediaCallback(ctx, action, fileId) {
+        try {
+            await ctx.answerCbQuery();
+            
+            switch (action) {
+                case 'article':
+                    await this.showArticleSelectionForMedia(ctx, fileId);
+                    break;
+                case 'post':
+                    await this.postMediaNow(ctx, fileId);
+                    break;
+                case 'schedule':
+                    await this.scheduleMediaPost(ctx, fileId);
+                    break;
+                case 'save':
+                    await this.saveMediaForLater(ctx, fileId);
+                    break;
+                case 'delete':
+                    await this.deleteMedia(ctx, fileId);
+                    break;
+            }
+        } catch (error) {
+            console.error('Media callback error:', error);
+            await ctx.editMessageText('❌ An error occurred');
+        }
+    }
+    
+    async showArticleSelectionForMedia(ctx, fileId) {
+        const articles = await this.db.collection('news_articles')
+            .find({})
+            .sort({ published_date: -1 })
+            .limit(10)
+            .toArray();
+        
+        if (articles.length === 0) {
+            return ctx.editMessageText('📰 No articles available');
+        }
+        
+        await ctx.editMessageText(
+            '📰 *Select Article for Media*\n\nChoose an article to attach this media to:',
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: articles.map(article => [{
+                        text: `📰 ${article.title.substring(0, 40)}...`,
+                        callback_data: `attach_media:${fileId}:${article._id}`
+                    }])
+                }
+            }
+        );
+    }
+    
+    async postMediaNow(ctx, fileId) {
+        const media = await this.db.collection('user_media').findOne({ file_id: fileId });
+        
+        if (!media) {
+            return ctx.editMessageText('❌ Media not found');
+        }
+        
+        const destinations = await this.db.collection('destinations').find({}).toArray();
+        
+        if (destinations.length === 0) {
+            return ctx.editMessageText('📍 No destinations configured');
+        }
+        
+        let successCount = 0;
+        for (const dest of destinations) {
+            try {
+                const options = {
+                    caption: media.caption || '📸 Shared via Zone News Bot',
+                    parse_mode: 'Markdown'
+                };
+                
+                switch (media.type) {
+                    case 'photo':
+                        await ctx.telegram.sendPhoto(dest.id, media.file_id, options);
+                        break;
+                    case 'video':
+                        await ctx.telegram.sendVideo(dest.id, media.file_id, options);
+                        break;
+                    case 'animation':
+                        await ctx.telegram.sendAnimation(dest.id, media.file_id, options);
+                        break;
+                    case 'document':
+                        await ctx.telegram.sendDocument(dest.id, media.file_id, options);
+                        break;
+                }
+                successCount++;
+            } catch (error) {
+                console.error(`Failed to post media to ${dest.id}:`, error);
+            }
+        }
+        
+        await ctx.editMessageText(
+            `✅ *Media Posted!*\n\n` +
+            `📍 Sent to ${successCount}/${destinations.length} destinations`,
+            { parse_mode: 'Markdown' }
+        );
+    }
+    
+    async saveMediaForLater(ctx, fileId) {
+        await this.db.collection('user_media').updateOne(
+            { file_id: fileId },
+            { $set: { status: 'saved', saved_at: new Date() } }
+        );
+        
+        await ctx.editMessageText('💾 Media saved for later use');
+    }
+    
+    async deleteMedia(ctx, fileId) {
+        await this.db.collection('user_media').deleteOne({ file_id: fileId });
+        await ctx.editMessageText('🗑️ Media deleted');
+    }
+    
+    async attachMediaToArticle(ctx, fileId, articleId) {
+        const { ObjectId } = require('mongodb');
+        
+        const media = await this.db.collection('user_media').findOne({ file_id: fileId });
+        const article = await this.db.collection('news_articles').findOne({ _id: new ObjectId(articleId) });
+        
+        if (!media || !article) {
+            return ctx.editMessageText('❌ Media or article not found');
+        }
+        
+        // Update article with media
+        await this.db.collection('news_articles').updateOne(
+            { _id: new ObjectId(articleId) },
+            { 
+                $set: { 
+                    media_id: fileId,
+                    media_type: media.type,
+                    has_media: true
+                }
+            }
+        );
+        
+        await ctx.editMessageText(
+            `✅ *Media Attached!*\n\n` +
+            `📰 Article: ${article.title}\n` +
+            `📸 Media: ${media.type}\n\n` +
+            'Use /post to share this article with media',
+            { parse_mode: 'Markdown' }
+        );
+    }
+    
+    async scheduleMediaPost(ctx, fileId) {
+        // Show time selection for media post
+        const timeOptions = [
+            { label: 'In 30 minutes', minutes: 30 },
+            { label: 'In 1 hour', minutes: 60 },
+            { label: 'In 2 hours', minutes: 120 },
+            { label: 'Tomorrow 9 AM', minutes: this.getMinutesUntilTime(9, 0) },
+            { label: 'Tomorrow 6 PM', minutes: this.getMinutesUntilTime(18, 0) }
+        ];
+        
+        await ctx.editMessageText(
+            '⏰ *Schedule Media Post*\n\nWhen should this media be posted?',
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: timeOptions.map(option => [{
+                        text: option.label,
+                        callback_data: `schedule_media:${fileId}:${option.minutes}`
+                    }])
+                }
+            }
+        );
+    }
+    
+    async handleSettingsCallback(ctx, setting) {
+        const { ObjectId } = require('mongodb');
+        const userId = ctx.from.id;
+        
+        try {
+            await ctx.answerCbQuery();
+            
+            switch (setting) {
+                case 'city':
+                    await this.showCitySelection(ctx);
+                    break;
+                case 'notifications':
+                    await this.toggleNotifications(ctx, userId);
+                    break;
+                case 'language':
+                    await this.showLanguageSelection(ctx);
+                    break;
+                case 'theme':
+                    await this.showThemeSelection(ctx);
+                    break;
+                case 'profile':
+                    await this.showUserProfile(ctx, userId);
+                    break;
+                case 'clear':
+                    await this.confirmClearData(ctx, userId);
+                    break;
+                default:
+                    if (setting.startsWith('setcity_')) {
+                        const city = setting.replace('setcity_', '');
+                        await this.setUserCity(ctx, userId, city);
+                    } else if (setting.startsWith('setlang_')) {
+                        const lang = setting.replace('setlang_', '');
+                        await this.setUserLanguage(ctx, userId, lang);
+                    } else if (setting.startsWith('settheme_')) {
+                        const theme = setting.replace('settheme_', '');
+                        await this.setUserTheme(ctx, userId, theme);
+                    }
+                    break;
+            }
+        } catch (error) {
+            console.error('Settings callback error:', error);
+            await ctx.editMessageText('❌ An error occurred');
+        }
+    }
+    
+    async showCitySelection(ctx) {
+        const cities = [
+            ['Adelaide', 'Melbourne'],
+            ['Sydney', 'Brisbane'],
+            ['Perth', 'Darwin'],
+            ['Hobart', 'Canberra'],
+            ['Gold Coast', 'Newcastle']
+        ];
+        
+        await ctx.editMessageText(
+            '📍 *Select Your City*\n\n' +
+            'Choose your city for localized news:',
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: cities.map(row => 
+                        row.map(city => ({
+                            text: city,
+                            callback_data: `settings:setcity_${city}`
+                        }))
+                    ).concat([[{ text: '⬅️ Back', callback_data: 'back_to_settings' }]])
+                }
+            }
+        );
+    }
+    
+    async setUserCity(ctx, userId, city) {
+        await this.db.collection('users').updateOne(
+            { telegram_id: userId },
+            { $set: { city: city, updated_at: new Date() } },
+            { upsert: true }
+        );
+        
+        await ctx.editMessageText(
+            `✅ City updated to *${city}*\n\n` +
+            'You will now receive news relevant to your area.',
+            { parse_mode: 'Markdown' }
+        );
+        
+        setTimeout(() => {
+            this.bot.telegram.sendMessage(ctx.chat.id, '/settings');
+        }, 2000);
+    }
+    
+    async toggleNotifications(ctx, userId) {
+        const user = await this.db.collection('users').findOne({ telegram_id: userId });
+        const currentStatus = user?.notifications !== false;
+        const newStatus = !currentStatus;
+        
+        await this.db.collection('users').updateOne(
+            { telegram_id: userId },
+            { $set: { notifications: newStatus, updated_at: new Date() } },
+            { upsert: true }
+        );
+        
+        await ctx.editMessageText(
+            `🔔 Notifications ${newStatus ? 'enabled' : 'disabled'}`,
+            {
+                reply_markup: {
+                    inline_keyboard: [[
+                        { text: '⬅️ Back to Settings', callback_data: 'back_to_settings' }
+                    ]]
+                }
+            }
+        );
+    }
+    
+    async showLanguageSelection(ctx) {
+        const languages = [
+            ['🇬🇧 English', 'en'],
+            ['🇪🇸 Spanish', 'es'],
+            ['🇫🇷 French', 'fr'],
+            ['🇩🇪 German', 'de'],
+            ['🇮🇹 Italian', 'it'],
+            ['🇵🇹 Portuguese', 'pt'],
+            ['🇷🇺 Russian', 'ru'],
+            ['🇨🇳 Chinese', 'zh'],
+            ['🇯🇵 Japanese', 'ja'],
+            ['🇰🇷 Korean', 'ko']
+        ];
+        
+        await ctx.editMessageText(
+            '🌐 *Select Language*\n\n' +
+            'Choose your preferred language:',
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: languages.map(([name, code]) => [{
+                        text: name,
+                        callback_data: `settings:setlang_${code}`
+                    }]).concat([[{ text: '⬅️ Back', callback_data: 'back_to_settings' }]])
+                }
+            }
+        );
+    }
+    
+    async setUserLanguage(ctx, userId, lang) {
+        await this.db.collection('users').updateOne(
+            { telegram_id: userId },
+            { $set: { language: lang, updated_at: new Date() } },
+            { upsert: true }
+        );
+        
+        const langNames = {
+            en: 'English',
+            es: 'Spanish',
+            fr: 'French',
+            de: 'German',
+            it: 'Italian',
+            pt: 'Portuguese',
+            ru: 'Russian',
+            zh: 'Chinese',
+            ja: 'Japanese',
+            ko: 'Korean'
+        };
+        
+        await ctx.editMessageText(
+            `✅ Language set to *${langNames[lang] || lang}*`,
+            { parse_mode: 'Markdown' }
+        );
+    }
+    
+    async showThemeSelection(ctx) {
+        await ctx.editMessageText(
+            '🎨 *Select Theme*\n\n' +
+            'Choose your preferred theme:',
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '☀️ Light', callback_data: 'settings:settheme_light' }],
+                        [{ text: '🌙 Dark', callback_data: 'settings:settheme_dark' }],
+                        [{ text: '🌓 Auto', callback_data: 'settings:settheme_auto' }],
+                        [{ text: '⬅️ Back', callback_data: 'back_to_settings' }]
+                    ]
+                }
+            }
+        );
+    }
+    
+    async setUserTheme(ctx, userId, theme) {
+        await this.db.collection('users').updateOne(
+            { telegram_id: userId },
+            { $set: { theme: theme, updated_at: new Date() } },
+            { upsert: true }
+        );
+        
+        const themeEmoji = {
+            light: '☀️',
+            dark: '🌙',
+            auto: '🌓'
+        };
+        
+        await ctx.editMessageText(
+            `✅ Theme set to ${themeEmoji[theme]} ${theme}`,
+            {
+                reply_markup: {
+                    inline_keyboard: [[
+                        { text: '⬅️ Back to Settings', callback_data: 'back_to_settings' }
+                    ]]
+                }
+            }
+        );
+    }
+    
+    async showUserProfile(ctx, userId) {
+        const [user, stats] = await Promise.all([
+            this.db.collection('users').findOne({ telegram_id: userId }),
+            this.db.collection('user_activity').findOne({ telegram_id: userId })
+        ]);
+        
+        const savedCount = await this.db.collection('saved_articles')
+            .countDocuments({ user_id: userId });
+        
+        const profileText = 
+            '👤 *Your Profile*\n\n' +
+            `🆔 ID: \`${userId}\`\n` +
+            `📍 City: ${user?.city || 'Not set'}\n` +
+            `🌐 Language: ${user?.language || 'English'}\n` +
+            `🎨 Theme: ${user?.theme || 'Auto'}\n` +
+            `🔔 Notifications: ${user?.notifications !== false ? 'On' : 'Off'}\n\n` +
+            '*Activity:*\n' +
+            `📰 Articles viewed: ${stats?.news_views || 0}\n` +
+            `💾 Articles saved: ${savedCount}\n` +
+            `📅 Member since: ${user?.created_at ? new Date(user.created_at).toLocaleDateString('en-AU') : 'Unknown'}`;
+        
+        await ctx.editMessageText(profileText, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: '⬅️ Back to Settings', callback_data: 'back_to_settings' }
+                ]]
+            }
+        });
+    }
+    
+    async confirmClearData(ctx, userId) {
+        await ctx.editMessageText(
+            '⚠️ *Clear All Data*\n\n' +
+            'This will delete:\n' +
+            '• All saved articles\n' +
+            '• Your preferences\n' +
+            '• Activity history\n\n' +
+            'Are you sure?',
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            { text: '✅ Yes, Clear', callback_data: 'confirm_clear_data' },
+                            { text: '❌ Cancel', callback_data: 'back_to_settings' }
+                        ]
+                    ]
+                }
+            }
+        );
+    }
+    
+    async saveArticle(ctx, articleId) {
+        const { ObjectId } = require('mongodb');
+        const userId = ctx.from.id;
+        
+        try {
+            await ctx.answerCbQuery();
+            
+            // Check if already saved
+            const existing = await this.db.collection('saved_articles').findOne({
+                user_id: userId,
+                article_id: new ObjectId(articleId)
+            });
+            
+            if (existing) {
+                // Unsave
+                await this.db.collection('saved_articles').deleteOne({
+                    user_id: userId,
+                    article_id: new ObjectId(articleId)
+                });
+                await ctx.answerCbQuery('📌 Article removed from saved', { show_alert: true });
+            } else {
+                // Save
+                await this.db.collection('saved_articles').insertOne({
+                    user_id: userId,
+                    article_id: new ObjectId(articleId),
+                    saved_at: new Date()
+                });
+                await ctx.answerCbQuery('💾 Article saved!', { show_alert: true });
+            }
+        } catch (error) {
+            console.error('Save article error:', error);
+            await ctx.answerCbQuery('❌ Failed to save article', { show_alert: true });
+        }
+    }
+    
+    async shareArticle(ctx, articleId) {
+        const { ObjectId } = require('mongodb');
+        
+        try {
+            await ctx.answerCbQuery();
+            
+            const article = await this.db.collection('news_articles')
+                .findOne({ _id: new ObjectId(articleId) });
+            
+            if (!article) {
+                return ctx.answerCbQuery('Article not found', { show_alert: true });
+            }
+            
+            const shareText = 
+                `📰 ${article.title}\n\n` +
+                `${article.summary || article.content?.substring(0, 200)}...\n\n` +
+                `Read more: ${article.url || 'https://thezonenews.com'}\n\n` +
+                `Shared via @ZoneNewsBot`;
+            
+            await ctx.reply(shareText, {
+                reply_markup: {
+                    inline_keyboard: [[
+                        { text: '📤 Share to Telegram', url: `https://t.me/share/url?url=${encodeURIComponent(article.url || 'https://thezonenews.com')}&text=${encodeURIComponent(article.title)}` }
+                    ]]
+                }
+            });
+        } catch (error) {
+            console.error('Share article error:', error);
+            await ctx.answerCbQuery('❌ Failed to share', { show_alert: true });
+        }
+    }
+    
+    async handleComment(ctx, articleId) {
+        const { ObjectId } = require('mongodb');
+        
+        try {
+            await ctx.answerCbQuery();
+            
+            // Set state for comment input
+            await this.db.collection('user_states').updateOne(
+                { user_id: ctx.from.id },
+                { 
+                    $set: { 
+                        state: 'awaiting_comment',
+                        article_id: articleId,
+                        created_at: new Date()
+                    }
+                },
+                { upsert: true }
+            );
+            
+            await ctx.reply(
+                '💬 *Add Comment*\n\n' +
+                'Type your comment below (max 500 characters):',
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        force_reply: true,
+                        input_field_placeholder: 'Enter your comment...'
+                    }
+                }
+            );
+        } catch (error) {
+            console.error('Comment error:', error);
+            await ctx.answerCbQuery('❌ Failed to add comment', { show_alert: true });
+        }
+    }
+}
+
+module.exports = CommandService;

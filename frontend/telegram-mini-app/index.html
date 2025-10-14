@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Zone News - Your Local News Hub</title>
+    <meta name="description" content="Stay informed with local Adelaide news - Zone News Telegram Mini App">
+    <meta name="theme-color" content="#667eea">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="manifest.json">
+    
+    <!-- iOS PWA Support -->
+    <meta name="apple-mobile-web-app-title" content="Zone News">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="apple-touch-startup-image" href="icons/startup-640x1136.png">
+    
+    <!-- Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <!-- Preload critical resources -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="dns-prefetch" href="//67.219.107.230">
+    
+    <!-- Preload critical CSS -->
+    <link rel="preload" href="style.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="style.css"></noscript>
+    
+    <!-- Preload critical JS modules -->
+    <link rel="modulepreload" href="js/config.js">
+    <link rel="modulepreload" href="js/telegram-integration.js">
+    <link rel="modulepreload" href="js/api-service.js">
+    <link rel="modulepreload" href="js/storage-service.js">
+    <link rel="modulepreload" href="js/module-loader.js">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📰%3C/text%3E%3C/svg%3E">
+    
+    <!-- Performance and Analytics -->
+    <script>
+      // Early performance tracking
+      window.performanceMarks = {
+        domStart: performance.now(),
+        navigationStart: performance.timing?.navigationStart || Date.now()
+      };
+    </script>
+</head>
+<body>
+    <!-- Skip to content for accessibility -->
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+    
+    <!-- Header -->
+    <header class="header" role="banner">
+        <div class="header-content">
+            <h1 class="header-title">
+                <span class="header-icon" aria-hidden="true">📰</span>
+                Zone News
+            </h1>
+            <p class="header-subtitle">Your Local Adelaide News Hub</p>
+        </div>
+        <div class="header-gradient" aria-hidden="true"></div>
+    </header>
+
+    <!-- Main Content -->
+    <main id="main-content" class="main-content" role="main">
+        <div class="container">
+            <!-- Tier Banner -->
+            <aside class="tier-banner" id="tierBanner" style="display: none;" role="complementary" aria-label="Subscription upgrade banner">
+                <div class="tier-content">
+                    <div class="tier-text">
+                        <strong class="tier-title">Upgrade to Zone Pro</strong>
+                        <div class="tier-features">50 articles/day + AI summaries + breaking news alerts</div>
+                    </div>
+                    <button class="tier-button" onclick="handleUpgrade()" aria-label="Upgrade to Zone Pro subscription">
+                        <span class="tier-price">$14.99</span>
+                        <span class="tier-period">/month</span>
+                    </button>
+                </div>
+                <button class="tier-close" onclick="closeTierBanner()" aria-label="Dismiss upgrade banner">
+                    <span aria-hidden="true">×</span>
+                </button>
+            </aside>
+
+            <!-- Enhanced Search Bar -->
+            <div class="search-container" id="searchContainer">
+                <div class="search-input-wrapper">
+                    <span class="search-icon">🔍</span>
+                    <input 
+                        type="search" 
+                        id="searchInput" 
+                        class="search-input" 
+                        placeholder="Search Adelaide news..."
+                        autocomplete="off"
+                        aria-label="Search news articles"
+                    >
+                    <button class="search-clear" id="searchClear" style="display: none;" aria-label="Clear search">
+                        <span aria-hidden="true">×</span>
+                    </button>
+                </div>
+                
+                <!-- Search Suggestions -->
+                <div class="search-suggestions" id="searchSuggestions" style="display: none;">
+                    <div class="suggestions-header">
+                        <span>Quick Searches</span>
+                    </div>
+                    <div class="suggestions-list" id="suggestionsList">
+                        <!-- Dynamic suggestions will be added here -->
+                    </div>
+                </div>
+                
+                <!-- Advanced Search Filters -->
+                <div class="search-filters" id="searchFilters" style="display: none;">
+                    <div class="filter-row">
+                        <select id="categoryFilter" class="filter-select">
+                            <option value="all">All Categories</option>
+                            <option value="business">Business</option>
+                            <option value="local">Local</option>
+                            <option value="sports">Sports</option>
+                            <option value="health">Health</option>
+                        </select>
+                        <select id="timeFilter" class="filter-select">
+                            <option value="all">All Time</option>
+                            <option value="today">Today</option>
+                            <option value="week">This Week</option>
+                            <option value="month">This Month</option>
+                        </select>
+                    </div>
+                    <div class="filter-actions">
+                        <button class="btn-filter-apply" id="applyFilters">Apply Filters</button>
+                        <button class="btn-filter-clear" id="clearFilters">Clear All</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filter Tabs -->
+            <nav class="filter-tabs" role="navigation" aria-label="News categories">
+                <button class="filter-tab active" data-category="all" aria-pressed="true">
+                    <span class="tab-icon" aria-hidden="true">🏠</span>
+                    All News
+                </button>
+                <button class="filter-tab" data-category="local" aria-pressed="false">
+                    <span class="tab-icon" aria-hidden="true">📍</span>
+                    Local
+                </button>
+                <button class="filter-tab" data-category="business" aria-pressed="false">
+                    <span class="tab-icon" aria-hidden="true">💼</span>
+                    Business
+                </button>
+                <button class="filter-tab" data-category="sports" aria-pressed="false">
+                    <span class="tab-icon" aria-hidden="true">⚽</span>
+                    Sports
+                </button>
+            </nav>
+
+            <!-- News Container -->
+            <section class="news-section" aria-label="News articles">
+                <div id="newsContainer" class="news-container">
+                    <div class="loading-state" role="status" aria-live="polite">
+                        <div class="loading-spinner" aria-hidden="true"></div>
+                        <span class="loading-text">Loading latest news...</span>
+                    </div>
+                </div>
+                
+                <!-- Empty State -->
+                <div id="emptyState" class="empty-state" style="display: none;" role="status">
+                    <div class="empty-icon" aria-hidden="true">📰</div>
+                    <h3 class="empty-title">No articles found</h3>
+                    <p class="empty-description">Try refreshing or check back later for the latest news.</p>
+                    <button class="refresh-button" onclick="loadNews()" aria-label="Refresh news articles">
+                        <span aria-hidden="true">🔄</span>
+                        Refresh
+                    </button>
+                </div>
+            </section>
+
+            <!-- Usage Statistics -->
+            <aside class="usage-stats" id="usageStats" style="display: none;" role="complementary" aria-label="Daily usage statistics">
+                <div class="stats-content">
+                    <span class="stats-label">Articles read today:</span>
+                    <div class="stats-progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                        <span class="stats-text" id="statsText">0/10</span>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </main>
+
+    <!-- Bottom Navigation -->
+    <nav class="bottom-nav" role="navigation" aria-label="Main navigation">
+        <button class="nav-item active" data-tab="home" aria-pressed="true" aria-label="Home page">
+            <span class="nav-icon" aria-hidden="true">🏠</span>
+            <span class="nav-label">Home</span>
+        </button>
+        <button class="nav-item" data-tab="saved" aria-pressed="false" aria-label="Saved articles">
+            <span class="nav-icon" aria-hidden="true">📑</span>
+            <span class="nav-label">Saved</span>
+            <span class="nav-badge" id="savedBadge" style="display: none;">0</span>
+        </button>
+        <button class="nav-item" data-tab="trending" aria-pressed="false" aria-label="Trending news">
+            <span class="nav-icon" aria-hidden="true">🔥</span>
+            <span class="nav-label">Trending</span>
+        </button>
+        <button class="nav-item" data-tab="profile" aria-pressed="false" aria-label="User profile">
+            <span class="nav-icon" aria-hidden="true">👤</span>
+            <span class="nav-label">Profile</span>
+        </button>
+    </nav>
+
+    <!-- Article Modal -->
+    <div class="modal-overlay" id="articleModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-content">
+            <header class="modal-header">
+                <h2 id="modal-title" class="modal-title"></h2>
+                <button class="modal-close" onclick="closeArticleModal()" aria-label="Close article">
+                    <span aria-hidden="true">×</span>
+                </button>
+            </header>
+            <div class="modal-body" id="modal-body">
+                <!-- Article content will be injected here -->
+            </div>
+            <footer class="modal-footer">
+                <div class="article-actions">
+                    <button class="action-button" id="saveButton" onclick="toggleSaveArticle()" aria-label="Save article">
+                        <span class="action-icon" aria-hidden="true">📑</span>
+                        <span class="action-text">Save</span>
+                    </button>
+                    <button class="action-button" onclick="shareArticle()" aria-label="Share article">
+                        <span class="action-icon" aria-hidden="true">📤</span>
+                        <span class="action-text">Share</span>
+                    </button>
+                    <div class="reactions" role="group" aria-label="Article reactions">
+                        <button class="reaction-button" data-reaction="👍" onclick="addReaction('👍')" aria-label="Like article">
+                            <span class="reaction-emoji">👍</span>
+                            <span class="reaction-count" id="like-count">0</span>
+                        </button>
+                        <button class="reaction-button" data-reaction="❤️" onclick="addReaction('❤️')" aria-label="Love article">
+                            <span class="reaction-emoji">❤️</span>
+                            <span class="reaction-count" id="love-count">0</span>
+                        </button>
+                    </div>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div class="toast" id="toast" style="display: none;" role="alert" aria-live="assertive">
+        <div class="toast-content">
+            <span class="toast-icon" id="toastIcon"></span>
+            <span class="toast-message" id="toastMessage"></span>
+        </div>
+    </div>
+
+    <!-- Performance Optimized Scripts -->
+    <script>
+      // Service Worker Registration
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('sw.js', { scope: '/telegram-mini-app/' })
+            .then(registration => {
+              console.log('✅ SW registered:', registration);
+              
+              // Check for updates
+              registration.addEventListener('updatefound', () => {
+                const newWorker = registration.installing;
+                newWorker.addEventListener('statechange', () => {
+                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    // New version available
+                    if (confirm('New version available! Reload to update?')) {
+                      window.location.reload();
+                    }
+                  }
+                });
+              });
+            })
+            .catch(error => console.warn('SW registration failed:', error));
+        });
+      }
+
+      // Feature Detection and Polyfill Loading
+      const loadPolyfills = async () => {
+        const polyfills = [];
+        
+        // Check for IntersectionObserver
+        if (!window.IntersectionObserver) {
+          polyfills.push(import('https://polyfill.io/v3/polyfill.min.js?features=IntersectionObserver'));
+        }
+        
+        // Check for ResizeObserver
+        if (!window.ResizeObserver) {
+          polyfills.push(import('https://polyfill.io/v3/polyfill.min.js?features=ResizeObserver'));
+        }
+        
+        return Promise.allSettled(polyfills);
+      };
+
+      // Initialize App with Performance Monitoring
+      const initializeApp = async () => {
+        try {
+          // Mark initialization start
+          performance.mark('app-init-start');
+          
+          // Load polyfills if needed
+          await loadPolyfills();
+          
+          // Initialize error monitoring first
+          const { errorMonitoring } = await import('./js/error-monitoring.js');
+          
+          // Initialize performance analytics
+          const { performanceAnalytics } = await import('./js/performance-analytics.js');
+          
+          // Load optimized app
+          const { ZoneNewsAppOptimized } = await import('./js/app-optimized.js');
+          
+          // Create and initialize app
+          window.app = new ZoneNewsAppOptimized();
+          await window.app.initialize();
+          
+          // Mark initialization complete
+          performance.mark('app-init-end');
+          performance.measure('app-initialization', 'app-init-start', 'app-init-end');
+          
+          // Track initialization performance
+          const measure = performance.getEntriesByName('app-initialization')[0];
+          performanceAnalytics.trackFeatureUsage('app', 'initialized', {
+            duration: measure.duration,
+            timestamp: Date.now()
+          });
+          
+          console.log(`🚀 Zone News App initialized in ${measure.duration.toFixed(2)}ms`);
+          
+        } catch (error) {
+          console.error('❌ App initialization failed:', error);
+          
+          // Fallback to basic app
+          try {
+            console.log('🔄 Loading fallback app...');
+            const { ZoneNewsApp } = await import('./js/app.js');
+            window.app = new ZoneNewsApp();
+            await window.app.initialize();
+            console.log('✅ Fallback app loaded');
+          } catch (fallbackError) {
+            console.error('❌ Fallback app failed:', fallbackError);
+            document.body.innerHTML = `
+              <div style="text-align: center; padding: 2rem; font-family: sans-serif;">
+                <h1>🚨 App Failed to Load</h1>
+                <p>Please refresh the page or try again later.</p>
+                <button onclick="location.reload()" style="padding: 1rem 2rem; font-size: 1rem; background: #667eea; color: white; border: none; border-radius: 0.5rem; cursor: pointer;">
+                  Refresh Page
+                </button>
+              </div>
+            `;
+          }
+        }
+      };
+
+      // Start initialization when DOM is ready
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initializeApp);
+      } else {
+        initializeApp();
+      }
+
+      // Global error handler fallback
+      window.addEventListener('error', (event) => {
+        console.error('Global error:', event.error);
+      });
+
+      window.addEventListener('unhandledrejection', (event) => {
+        console.error('Unhandled promise rejection:', event.reason);
+        event.preventDefault();
+      });
+    </script>
+    
+    <!-- Telegram WebApp Integration -->
+    <script>
+      // Telegram WebApp Ready Handler
+      if (window.Telegram?.WebApp) {
+        window.Telegram.WebApp.ready();
+        window.Telegram.WebApp.expand();
+        
+        // Handle main button click
+        window.Telegram.WebApp.onEvent('mainButtonClicked', () => {
+          if (window.app && window.app.handleRefresh) {
+            window.app.handleRefresh();
+          }
+        });
+        
+        console.log('✅ Telegram WebApp integration ready');
+      }
+    </script>
+</body>
+</html>
