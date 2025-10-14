@@ -23,6 +23,7 @@ try {
 const EmojiReactionHandler = require('./emoji-reaction-handler');
 const DatabaseIndexingService = require('./database-indexing.service');
 const ArticleCurationService = require('./article-curation.service');
+const URLArticleHandler = require('../handlers/url-article-handler');
 
 class BotInitialization {
     constructor() {
@@ -233,6 +234,15 @@ class BotInitialization {
                 console.log('✅ Article Curation Service initialized');
             } catch (e) {
                 console.log('⚠️ Article Curation Service initialization failed:', e.message);
+            }
+
+            // URL Article Handler - for quick article submission via link
+            try {
+                this.services.urlArticleHandler = new URLArticleHandler(this.bot, this.services.db.getDatabase(), this.services);
+                this.services.urlArticleHandler.initialize();
+                console.log('✅ URL Article Handler initialized');
+            } catch (e) {
+                console.log('⚠️ URL Article Handler initialization failed:', e.message);
             }
 
             // Channel reaction solution - removed as it's replaced by built-in reaction handlers
